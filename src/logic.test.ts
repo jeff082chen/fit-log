@@ -94,3 +94,20 @@ describe('個人紀錄', () => {
     expect(bestSets([W(1, 'a', '伏地挺身', '雙', [{ kg: null, reps: 15 }], '推')], null)!.maxVolume).toBeNull()
   })
 })
+
+describe('單邊動作', () => {
+  it('合併、摘要與左右差', async () => {
+    const { sessionsOf, pairSummary, imbalance } = await import('./logic')
+    const rows = analyzeWorkouts([
+      W(1, '2026-11-24', '保加利亞分腿蹲', '左', [{ kg: 10, reps: 10 }, { kg: null, reps: 10 }, { kg: null, reps: 9 }]),
+      W(2, '2026-11-24', '保加利亞分腿蹲', '右', [{ kg: 10, reps: 10 }, { kg: null, reps: 8 }, { kg: null, reps: 7 }]),
+      W(3, '2026-11-27', '保加利亞分腿蹲', '左', [{ kg: 12, reps: 8 }]),
+    ], null)
+    const ss = sessionsOf(rows)
+    expect(ss.length).toBe(2)
+    expect(pairSummary(ss[0])).toBe('10kg × 左 10/10/9・右 10/8/7')
+    expect(imbalance(ss[0])).toEqual({ weak: '右', pct: 14 })
+    expect(imbalance(ss[1])).toBeNull()
+    expect(pairSummary(ss[1])).toBe('左 12kg × 8')
+  })
+})

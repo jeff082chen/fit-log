@@ -241,3 +241,55 @@ export function bestSets(
     maxVolume: maxVolume.volume > 0 ? maxVolume : null,
   }
 }
+
+// ---------- 單邊動作 ----------
+export interface TrainingSession {
+  date: string
+  L?: WorkoutRow
+  R?: WorkoutRow
+  B?: WorkoutRow
+}
+
+/** 把同一動作的紀錄依日期合併（左右放在同一天） */
+export function sessionsOf(rows: WorkoutRow[]): TrainingSession[] {
+  const out: TrainingSession[] = []
+  for (const r of rows) {
+    let s = out[out.length - 1]
+    if (!s || s.date !== r.date) out.push((s = { date: r.date }))
+    s[r.side === '左' ? 'L' : r.side === '右' ? 'R' : 'B'] = r
+  }
+  return out
+}
+
+/** 一側的工作量：有重量用 重量×次數，自重用次數 */
+export function workload(r: WorkoutRow): number {
+  return r.m.volume > 0 ? r.m.volume : r.m.totalReps
+}
+
+/** 左右差：弱側比強側少多少（%），差距不到 1% 視為平衡 */
+export function imbalance(s: TrainingSession): { weak: '左' | '右'; pct: number } | null {
+  if (!s.L || !s.R) return null
+  const l = workload(s.L)
+  const r = workload(s.R)
+  const hi = Math.max(l, r)
+  if (hi <= 0) return null
+  const pct = Math.round((Math.abs(l - r) / hi) * 100)
+  return pct < 1 ? null : { weak: l < r ? '左' : '右', pct }
+}
+
+export const IMBALANCE_ALERT = 10
+
+/** 左右合併成一行摘要 */
+export function pairSummary(s: TrainingSession): string {
+  if (s.B && !s.L && !s.R) return setsSummary(s.B.sets)
+  const one = (r?: WorkoutRow) => (r ? effectiveSets(r.sets) : [])
+  const l = one(s.L)
+  const r = one(s.R)
+  const kgs = new Set([...l, ...r].map((x) => x.kg))
+  if (l.length && r.length && kgs.size === 1) {
+    const kg = [...kgs][0]
+    const k = kg < 0 ? `輔助${-kg}kg × ` : kg ? `${kg}kg × ` : ''
+    return `${k}左 ${l.map((x) => x.reps).join('/')}・右 ${r.map((x) => x.reps).join('/')}`
+  }
+  return [s.L && `左 ${setsSummary(s.L.sets)}`, s.R && `右 ${setsSummary(s.R.sets)}`].filter(Boolean).join('・')
+}

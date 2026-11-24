@@ -14,7 +14,7 @@ export interface Dataset {
 
 const AI_GUIDE: [string, string][] = [
   ['通用', '各資料頁第 1 列是標題、第 2 列是表頭、資料從第 3 列開始（pandas：header=1）。用欄位名稱辨識欄位。表頭標「(計算)」的欄位是匯出時算好的值。'],
-  ['訓練頁', '腿／推／拉／引體／核心。一列＝某天一個動作（單邊動作則是一側）。欄位：日期、動作、側別（雙／左／右）、組N kg、組N 次數、備註；引體多一欄體重(kg)。'],
+  ['訓練頁', '腿／推／拉／引體／核心。一列＝某天一個動作；單邊動作（清單在「設定」頁）左右各一列。欄位：日期、動作、側別（雙／左／右）、組N kg、組N 次數、備註；引體多一欄體重(kg)。'],
   ['kg 留空', '有次數但 kg 空白＝沿用前一組重量；第一組也空白＝自重（0）。沒填次數＝沒做。'],
   ['重量記法', '啞鈴記單手重量；名稱含「槓鈴」記總重量（含槓）；高腳杯深蹲、仰臥拉舉記單顆重量。'],
   ['引體', 'kg 負數＝輔助公斤數（-20＝輔助 20 kg），0＝自重，正數＝加重。有效負重＝體重＋kg。'],
@@ -70,6 +70,7 @@ export function exportXlsx(data: { workouts: Workout[]; logs: DailyLog[]; body: 
   const setRows: Cell[][] = [['身高(cm)', '', s.height_cm], ['出生日期', '', s.birth_date]]
   for (const t of s.cycle_targets) setRows.push(['Cycle目標', t.item, t.target])
   for (const c of CATEGORIES) for (const e of s.exercises[c]) setRows.push(['動作', c, e])
+  for (const e of s.unilateral) setRows.push(['單邊動作', '', e])
   XLSX.utils.book_append_sheet(wb, sheet('設定', ['類型', '名稱', '值'], setRows), '設定')
   XLSX.utils.book_append_sheet(wb, sheet('AI 解析說明', ['項目', '說明'], AI_GUIDE), 'AI解析說明')
   XLSX.writeFile(wb, `fit-log-${todayStr()}.xlsx`, { compression: true })
@@ -199,13 +200,16 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
     settingsFound = true
     const targets: Settings['cycle_targets'] = []
     const ex: Record<string, string[]> = {}
+    const uni: string[] = []
     for (const r of st.rows) {
       const [k, name, val] = [str(r[0]), str(r[1]), r[2]]
       if (k === '身高(cm)' && num(val)) out.settings.height_cm = num(val)!
       if (k === '出生日期' && parseDate(val)) out.settings.birth_date = parseDate(val)!
       if (k === 'Cycle目標' && name) targets.push({ item: name, target: num(val) ?? 0 })
       if (k === '動作' && name && str(val)) (ex[name] ??= []).push(str(val)!)
+      if (k === '單邊動作' && str(val)) uni.push(str(val)!)
     }
+    if (uni.length) out.settings.unilateral = uni
     if (targets.length) out.settings.cycle_targets = targets
     for (const c of CATEGORIES) if (ex[c]?.length) out.settings.exercises[c] = ex[c]
   } else {
@@ -244,7 +248,7 @@ export function parseJson(text: string): ImportResult {
   if (j.format !== 'fit-log') throw new Error('不是 fit-log 匯出的 JSON 檔')
   return {
     data: {
-      settings: { ...DEFAULT_SETTINGS, ...j.settings },
+      settings: { ...DEFAULT_SETTINGS, ...j.settings, unilateral: j.settings?.unilateral ?? DEFAULT_SETTINGS.unilateral },
       workouts: j.workouts ?? [],
       daily_logs: j.daily_logs ?? [],
       body_metrics: j.body_metrics ?? [],

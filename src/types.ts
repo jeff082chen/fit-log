@@ -54,6 +54,8 @@ export interface Settings {
   birth_date: string
   cycle_targets: CycleTarget[]
   exercises: Record<Category, string[]>
+  /** 單邊動作（左右分開記錄）的名稱 */
+  unilateral: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -76,4 +78,5 @@ export const DEFAULT_SETTINGS: Settings = {
     引體: ['輔助反握引體', '輔助肩胛骨引體'],
     核心: ['捲腹', '抬腿', '俄羅斯轉體'],
   },
+  unilateral: ['保加利亞分腿蹲'],
 }

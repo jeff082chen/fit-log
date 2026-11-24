@@ -57,12 +57,19 @@ export async function loadSettings(): Promise<Settings> {
     height_cm: Number(data.height_cm),
     birth_date: data.birth_date,
     cycle_targets: data.cycle_targets,
-    exercises: { ...DEFAULT_SETTINGS.exercises, ...data.exercises },
+    exercises: Object.fromEntries(
+      Object.entries({ ...DEFAULT_SETTINGS.exercises, ...data.exercises }).filter(([k]) => !k.startsWith('_')),
+    ) as Settings['exercises'],
+    unilateral: Array.isArray(data.exercises?._unilateral) ? data.exercises._unilateral : DEFAULT_SETTINGS.unilateral,
   }
 }
 
 export async function saveSettings(s: Settings): Promise<void> {
-  const { error } = await supabase.from('settings').upsert({ ...s, updated_at: new Date().toISOString() })
+  const { unilateral, ...rest } = s
+  // 單邊動作清單存在 exercises 欄位的 _unilateral 鍵（不需要改資料表結構）
+  const { error } = await supabase
+    .from('settings')
+    .upsert({ ...rest, exercises: { ...rest.exercises, _unilateral: unilateral }, updated_at: new Date().toISOString() })
   fail(error)
 }
 

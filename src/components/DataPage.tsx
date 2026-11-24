@@ -150,7 +150,8 @@ function SettingsCard({ settings, run }: { settings: Settings; run: PageProps['r
       CATEGORIES.map((c) => [c, exText[c].split('\n').map((x) => x.trim()).filter(Boolean)]),
     ) as Settings['exercises']
     const cycle_targets = s.cycle_targets.filter((t) => t.item.trim()).map((t) => ({ item: t.item.trim(), target: Math.max(0, Math.round(t.target)) }))
-    run(() => saveSettings({ ...s, exercises, cycle_targets }), '設定已儲存')
+    const all = new Set(Object.values(exercises).flat())
+    run(() => saveSettings({ ...s, exercises, cycle_targets, unilateral: s.unilateral.filter((x) => all.has(x)) }), '設定已儲存')
   }
   const setT = (i: number, patch: Partial<Settings['cycle_targets'][number]>) =>
     setS({ ...s, cycle_targets: s.cycle_targets.map((t, j) => (j === i ? { ...t, ...patch } : t)) })
@@ -201,6 +202,23 @@ function SettingsCard({ settings, run }: { settings: Settings; run: PageProps['r
           <textarea rows={Math.max(3, exText[c].split('\n').length)} value={exText[c]} onChange={(e) => setExText({ ...exText, [c]: e.target.value })} />
         </label>
       ))}
+      <h3>單邊動作（左右分開記錄）</h3>
+      <div className="chips">
+        {[...new Set(CATEGORIES.flatMap((c) => exText[c].split('\n').map((x) => x.trim()).filter(Boolean)))].map((name) => {
+          const on = s.unilateral.includes(name)
+          return (
+            <button
+              key={name}
+              className={`chip ${on ? 'on' : ''}`}
+              onClick={() => setS({ ...s, unilateral: on ? s.unilateral.filter((x) => x !== name) : [...s.unilateral, name] })}
+            >
+              {on ? '✓ ' : ''}
+              {name}
+            </button>
+          )
+        })}
+      </div>
+      <p className="muted small">點選要左右分開記錄的動作。單邊動作會用「左次數／右次數」並排輸入，並顯示左右差。</p>
       <button className="primary full" disabled={!dirty} onClick={save}>
         儲存設定
       </button>

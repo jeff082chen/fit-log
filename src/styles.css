@@ -175,3 +175,14 @@ details.card summary h2 { display: inline; }
 .import-preview p { margin: 0; }
 .targets td:first-child { width: auto; text-align: left; }
 .records .rec-label { width: 64px; flex: none; }
+
+.tag.uni { margin-left: 6px; background: var(--warn-soft); color: var(--warn); vertical-align: 2px; }
+.hint { margin: 0; padding: 8px 10px; border-radius: 10px; font-size: 13.5px; }
+.hint.warn { background: var(--bad-soft); color: var(--bad); }
+.hint.ok { background: var(--good-soft); color: var(--good); }
+.sets.uni th, .sets.uni td { padding-left: 3px; padding-right: 3px; }
+.recs td { font-size: 13px; vertical-align: top; }
+.recs td:first-child { text-align: left; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 6px 10px; border-radius: 16px; background: var(--bg); color: var(--muted); font-size: 13.5px; }
+.chip.on { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
