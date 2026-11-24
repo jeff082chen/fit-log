@@ -203,3 +203,41 @@ export function latestWeight(ms: BodyMetric[]): number | null {
   const rows = analyzeBody(ms, 170, '2000-01-01').filter((m) => m.weight !== null)
   return rows.length ? rows[rows.length - 1].weight : null
 }
+
+// ---------- 個人紀錄 ----------
+export interface BestSet {
+  date: string
+  side: Workout['side']
+  kg: number
+  reps: number
+  load: number // 引體＝體重＋kg，其他＝kg
+  volume: number // load × reps
+}
+
+/** 歷史中重量最重、次數最多、容量（重量×次數）最大的一組 */
+export function bestSets(
+  rows: Pick<Workout, 'date' | 'side' | 'sets' | 'category' | 'body_weight'>[],
+  defaultBW: number | null,
+): { heaviest: BestSet; mostReps: BestSet; maxVolume: BestSet | null } | null {
+  const all: BestSet[] = []
+  for (const r of rows) {
+    const bw = r.category === '引體' ? r.body_weight ?? defaultBW ?? 0 : 0
+    for (const s of effectiveSets(r.sets)) {
+      const load = s.kg + bw
+      all.push({ date: r.date, side: r.side, kg: s.kg, reps: s.reps, load, volume: load * s.reps })
+    }
+  }
+  if (!all.length) return null
+  const best = (score: (b: BestSet) => [number, number]) =>
+    all.reduce((a, b) => {
+      const [x1, x2] = score(a)
+      const [y1, y2] = score(b)
+      return y1 > x1 || (y1 === x1 && y2 > x2) ? b : a
+    })
+  const maxVolume = best((b) => [b.volume, b.load])
+  return {
+    heaviest: best((b) => [b.load, b.reps]),
+    mostReps: best((b) => [b.reps, b.load]),
+    maxVolume: maxVolume.volume > 0 ? maxVolume : null,
+  }
+}

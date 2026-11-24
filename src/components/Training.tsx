@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { PageProps } from '../App'
 import { deleteRow, insertRows, updateRow } from '../db'
-import { analyzeWorkouts, fmtDate, latestWeight, setsSummary, todayStr, type WorkoutRow } from '../logic'
+import { analyzeWorkouts, bestSets, fmtDate, latestWeight, setsSummary, todayStr, type BestSet, type WorkoutRow } from '../logic'
 import { CATEGORIES, CATEGORY_TO_ITEM, SIDES, type Category, type SetEntry, type Side } from '../types'
 import LineChart from './LineChart'
 
@@ -138,10 +138,22 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
   const prev = editing ?? [...hist].reverse().find((r) => r.side === side) ?? hist[hist.length - 1]
   const initSets: SetEntry[] = prev?.sets.length ? prev.sets : [{ kg: null, reps: null }, { kg: null, reps: null }, { kg: null, reps: null }]
   const [assist, setAssist] = useState(() => (isPull ? !initSets.some((s) => s.kg !== null && s.kg > 0) : false))
+  // 新紀錄：輸入框留空，灰字顯示上次各組的重量和次數；編輯：直接填入原本的值
   const [sets, setSets] = useState<Draft>(() =>
-    initSets.map((s) => ({ kg: s.kg === null ? '' : String(isPull ? Math.abs(s.kg) : s.kg), reps: editing && s.reps !== null ? String(s.reps) : '' })),
+    initSets.map((s) =>
+      editing
+        ? { kg: s.kg === null ? '' : String(isPull ? Math.abs(s.kg) : s.kg), reps: s.reps === null ? '' : String(s.reps) }
+        : { kg: '', reps: '' },
+    ),
   )
-  const [repsHint] = useState(() => initSets.map((s) => (s.reps === null ? '' : String(s.reps))))
+  const [hints] = useState(() => {
+    let last = 0
+    return initSets.map((s) => {
+      if (s.kg !== null) last = s.kg
+      return { kg: Math.abs(last), reps: s.reps }
+    })
+  })
+  const bodyweightOnly = category === '核心' || hints.every((h) => h.kg === 0)
   const [note, setNote] = useState(editing?.note ?? '')
   const [bodyW, setBodyW] = useState(editing?.body_weight != null ? String(editing.body_weight) : '')
   const item = CATEGORY_TO_ITEM[category]
@@ -154,10 +166,10 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
   }
   const buildSets = (): SetEntry[] => {
     const out = sets.map((s, i) => {
-      let kg = parse(s.kg)
-      if (kg !== null && isPull && assist) kg = -Math.abs(kg)
-      // 次數留空時採用預填提示（直接照上次做完）
-      const reps = parse(s.reps) ?? (editing ? null : parse(repsHint[i] ?? ''))
+      // 留空時採用灰字（上次的值）；超出上次組數的 kg 留空＝同上一組
+      let kg = parse(s.kg) ?? (editing ? null : hints[i] ? hints[i].kg : null)
+      if (kg !== null && isPull) kg = assist ? -Math.abs(kg) : Math.abs(kg)
+      const reps = parse(s.reps) ?? (editing ? null : hints[i]?.reps ?? null)
       return { kg, reps }
     })
     // 和前一組重量相同的 kg 存成 null（沿用前一組）
@@ -195,6 +207,11 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
     if (editing && confirm('刪除這筆紀錄？')) runSave(() => deleteRow('workouts', editing.id), '已刪除').then((ok) => ok && onClose())
   }
 
+  const kgPlaceholder = (i: number): string => {
+    if (!editing && hints[i]) return bodyweightOnly ? '自重' : String(hints[i].kg)
+    return i > 0 ? '同上' : bodyweightOnly ? '自重' : ''
+  }
+  const records = bestSets(hist, defaultBW)
   const upd = (i: number, k: 'kg' | 'reps', v: string) => setSets((ss) => ss.map((s, j) => (j === i ? { ...s, [k]: v } : s)))
   const chartPts = hist.filter((r) => r.side === side && r.m.indicator !== null).map((r) => ({ x: r.date, y: r.m.indicator! }))
   const otherSide = side === '左' ? '右' : side === '右' ? '左' : null
@@ -245,10 +262,10 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
               <tr key={i}>
                 <td className="muted">{i + 1}</td>
                 <td>
-                  <input inputMode="decimal" value={s.kg} placeholder={i > 0 ? '同上' : category === '核心' || exercise === '伏地挺身' ? '自重' : ''} onChange={(e) => upd(i, 'kg', e.target.value)} />
+                  <input inputMode="decimal" value={s.kg} placeholder={kgPlaceholder(i)} onChange={(e) => upd(i, 'kg', e.target.value)} />
                 </td>
                 <td>
-                  <input inputMode="numeric" value={s.reps} placeholder={repsHint[i] ?? ''} onChange={(e) => upd(i, 'reps', e.target.value)} />
+                  <input inputMode="numeric" value={s.reps} placeholder={editing ? '' : hints[i]?.reps?.toString() ?? ''} onChange={(e) => upd(i, 'reps', e.target.value)} />
                 </td>
                 <td>
                   <button className="x" onClick={() => setSets((ss) => ss.filter((_, j) => j !== i))} aria-label="刪除這組">
@@ -262,7 +279,7 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
         <button className="ghost full" onClick={() => setSets((ss) => [...ss, { kg: '', reps: '' }])}>
           ＋ 加一組
         </button>
-        {!editing && <p className="muted small">灰字是上次的次數，留空就照上次儲存；kg 留空＝同上一組。</p>}
+        {!editing && <p className="muted small">灰字是上次的重量和次數，留空就照上次儲存；新增的組 kg 留空＝同上一組。</p>}
 
         <input placeholder="備註（選填）" value={note} onChange={(e) => setNote(e.target.value)} />
         {!editing && !alreadyLogged && (
@@ -287,6 +304,17 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
             儲存
           </button>
         </div>
+
+        {records && (
+          <>
+            <h3>個人紀錄</h3>
+            <ul className="list small records">
+              <Record label="最重" r={records.heaviest} isPull={isPull} />
+              <Record label="最多次" r={records.mostReps} isPull={isPull} />
+              {records.maxVolume && <Record label="最大容量" r={records.maxVolume} isPull={isPull} showVolume />}
+            </ul>
+          </>
+        )}
 
         {chartPts.length > 1 && (
           <>
@@ -316,5 +344,20 @@ function Editor({ data, state, setState, date, category, rows, defaultBW, onClos
         )}
       </div>
     </div>
+  )
+}
+
+function Record({ label, r, isPull, showVolume }: { label: string; r: BestSet; isPull: boolean; showVolume?: boolean }) {
+  const kg = r.kg < 0 ? `輔助 ${-r.kg} kg` : r.kg > 0 ? `${r.kg} kg` : isPull ? '自重' : '自重'
+  return (
+    <li>
+      <span className="muted rec-label">{label}</span>
+      <span>
+        {kg} × {r.reps}
+        {r.side !== '雙' && <span className="muted">（{r.side}）</span>}
+        {showVolume && <span className="muted">　容量 {Math.round(r.volume)}</span>}
+      </span>
+      <span className="muted">{fmtDate(r.date).slice(2)}</span>
+    </li>
   )
 }

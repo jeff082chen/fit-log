@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ageAt, analyzeBody, analyzeWorkouts, assignCycles, cycleInfo, effectiveSets, setsSummary, workoutMetrics } from './logic'
+import { ageAt, analyzeBody, bestSets, analyzeWorkouts, assignCycles, cycleInfo, effectiveSets, setsSummary, workoutMetrics } from './logic'
 import { DEFAULT_SETTINGS, RESET, type DailyLog, type Workout } from './types'
 
 const W = (id: number, date: string, exercise: string, side: Workout['side'], sets: Workout['sets'], category: Workout['category'] = '腿', bw: number | null = null): Workout => ({
@@ -71,5 +71,26 @@ describe('身體組成', () => {
     expect(r.ffmi).toBeCloseTo(18.167, 2)
     expect(r.nffmi).toBeCloseTo(18.655, 2)
     expect(r.age).toBe(24)
+  })
+})
+
+describe('個人紀錄', () => {
+  it('最重／最多次／最大容量', () => {
+    const r = bestSets([
+      W(1, '2026-11-20', '高腳杯深蹲', '雙', [{ kg: 18, reps: 15 }, { kg: null, reps: 12 }]),
+      W(2, '2026-11-23', '高腳杯深蹲', '雙', [{ kg: 20, reps: 12 }, { kg: 22, reps: 8 }]),
+    ], null)!
+    expect([r.heaviest.kg, r.heaviest.reps, r.heaviest.date]).toEqual([22, 8, '2026-11-23'])
+    expect([r.mostReps.kg, r.mostReps.reps]).toEqual([18, 15])
+    expect([r.maxVolume!.kg, r.maxVolume!.reps, r.maxVolume!.volume]).toEqual([18, 15, 270])
+  })
+  it('引體輔助越少越重；自重動作沒有容量', () => {
+    const r = bestSets([
+      W(1, 'a', '輔助反握引體', '雙', [{ kg: -20, reps: 6 }], '引體'),
+      W(2, 'b', '輔助反握引體', '雙', [{ kg: -15, reps: 4 }], '引體'),
+    ], 66.6)!
+    expect(r.heaviest.kg).toBe(-15)
+    expect(r.mostReps.kg).toBe(-20)
+    expect(bestSets([W(1, 'a', '伏地挺身', '雙', [{ kg: null, reps: 15 }], '推')], null)!.maxVolume).toBeNull()
   })
 })
