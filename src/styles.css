@@ -186,3 +186,20 @@ details.card summary h2 { display: inline; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 6px 10px; border-radius: 16px; background: var(--bg); color: var(--muted); font-size: 13.5px; }
 .chip.on { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+
+.edlist { list-style: none; margin: 0; padding: 0; }
+.edlist li { display: flex; align-items: center; gap: 4px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.edlist li:last-child { border-bottom: 0; }
+.edlist .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; }
+.edlist .num { width: 52px; padding: 6px 8px; text-align: center; }
+.edlist .ic { width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 15px; flex: none; }
+.edlist .ic:active { background: var(--line); }
+.flag { font-size: 11.5px; padding: 3px 7px; border-radius: 10px; background: var(--bg); color: var(--muted); flex: none; }
+.flag.on { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.flag.locked { opacity: .7; }
+.excat { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.catname { font-weight: 600; margin-top: 4px; }
+.maprow { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; font-size: 15px; margin-top: 4px; }
+.sticky-save { position: sticky; bottom: calc(62px + env(safe-area-inset-bottom)); background: var(--card); padding: 8px 0 2px; }
+.row .ghost, .row .primary, .row .danger { white-space: nowrap; }

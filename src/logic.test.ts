@@ -144,3 +144,25 @@ describe('體重依日期、自重動作', () => {
     expect(bestSets(w, 66.6)!.maxVolume).toBeNull()
   })
 })
+
+describe('改名', () => {
+  it('動作改名與合併', async () => {
+    const { renameExerciseInSettings } = await import('./logic')
+    const s = { ...DEFAULT_SETTINGS, unilateral: ['保加利亞分腿蹲'], bodyweight: ['伏地挺身'] }
+    const a = renameExerciseInSettings(s, '保加利亞分腿蹲', '分腿蹲')
+    expect(a.exercises['腿']).toEqual(['高腳杯深蹲', '分腿蹲', '槓鈴硬舉', '槓鈴臀橋', '小腿提踵'])
+    expect(a.unilateral).toEqual(['分腿蹲'])
+    const b = renameExerciseInSettings(s, '高腳杯深蹲', '槓鈴硬舉')
+    expect(b.exercises['腿']).toEqual(['槓鈴硬舉', '保加利亞分腿蹲', '槓鈴臀橋', '小腿提踵'])
+  })
+  it('Cycle 項目改名、合併與類別對應', async () => {
+    const { renameItemInSettings, validateName } = await import('./logic')
+    const a = renameItemInSettings(DEFAULT_SETTINGS, '輔助引體', '引體')
+    expect(a.cycle_targets.find((t) => t.item === '引體')!.target).toBe(3)
+    expect(a.category_items['引體']).toBe('引體')
+    const b = renameItemInSettings(DEFAULT_SETTINGS, '背', '核心')
+    expect(b.cycle_targets.map((t) => t.item)).toEqual(['腿', '推', '拉', '核心', 'HIIT', '輔助引體', '爬山'])
+    expect(b.cycle_targets.find((t) => t.item === '核心')!.target).toBe(2)
+    expect([validateName(''), validateName(RESET), validateName('_x'), validateName('ok')].map(Boolean)).toEqual([true, true, true, false])
+  })
+})

@@ -58,6 +58,8 @@ export interface Settings {
   unilateral: string[]
   /** 自重動作（有效負重＝體重＋kg，可記輔助／加重）；引體類別一律視為自重動作 */
   bodyweight: string[]
+  /** 在訓練頁存檔時，各類別自動記到每日紀錄的項目 */
+  category_items: Record<Category, string>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -82,4 +84,5 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   unilateral: ['保加利亞分腿蹲'],
   bodyweight: [],
+  category_items: { ...CATEGORY_TO_ITEM },
 }

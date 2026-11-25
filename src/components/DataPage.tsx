@@ -1,18 +1,19 @@
 import { useState } from 'react'
 import type { PageProps } from '../App'
-import { deleteAll, insertRows, saveSettings, supabase } from '../db'
+import { deleteAll, insertRows, renameInRecords, saveSettings, supabase } from '../db'
+import { renameExerciseInSettings, renameItemInSettings, validateName } from '../logic'
 import type { ImportResult } from '../io'
 
 // xlsx 套件較大，只在匯入／匯出時才載入
 const io = () => import('../io')
-import { CATEGORIES, type Settings } from '../types'
+import { CATEGORIES, type Category, type Settings } from '../types'
 
 export default function DataPage({ data, run, email }: PageProps & { email: string }) {
   return (
     <div className="page">
       <ExportCard data={data} />
       <ImportCard data={data} run={run} />
-      <SettingsCard settings={data.settings} run={run} />
+      <SettingsCard key={JSON.stringify(data.settings)} settings={data.settings} data={data} run={run} />
       <section className="card">
         <h2>帳號</h2>
         <p className="muted small">{email}</p>
@@ -140,24 +141,104 @@ function countDup(res: ImportResult, data: PageProps['data']): number {
   )
 }
 
-function SettingsCard({ settings, run }: { settings: Settings; run: PageProps['run'] }) {
+function SettingsCard({ settings, data, run }: { settings: Settings; data: PageProps['data']; run: PageProps['run'] }) {
   const [s, setS] = useState<Settings>(settings)
-  const [exText, setExText] = useState(() => Object.fromEntries(CATEGORIES.map((c) => [c, (settings.exercises[c] ?? []).join('\n')])))
-  const dirty = JSON.stringify(s) !== JSON.stringify(settings) || CATEGORIES.some((c) => exText[c] !== (settings.exercises[c] ?? []).join('\n'))
+  const [newEx, setNewEx] = useState<Record<string, string>>({})
+  const [newItem, setNewItem] = useState('')
+  const dirty = JSON.stringify(s) !== JSON.stringify(settings)
 
   const save = () => {
-    const exercises = Object.fromEntries(
-      CATEGORIES.map((c) => [c, exText[c].split('\n').map((x) => x.trim()).filter(Boolean)]),
-    ) as Settings['exercises']
-    const cycle_targets = s.cycle_targets.filter((t) => t.item.trim()).map((t) => ({ item: t.item.trim(), target: Math.max(0, Math.round(t.target)) }))
-    const all = new Set(Object.values(exercises).flat())
+    const all = new Set(Object.values(s.exercises).flat())
     run(
-      () => saveSettings({ ...s, exercises, cycle_targets, unilateral: s.unilateral.filter((x) => all.has(x)), bodyweight: s.bodyweight.filter((x) => all.has(x)) }),
+      () =>
+        saveSettings({
+          ...s,
+          cycle_targets: s.cycle_targets.map((t) => ({ ...t, target: Math.max(0, Math.round(t.target)) })),
+          unilateral: s.unilateral.filter((x) => all.has(x)),
+          bodyweight: s.bodyweight.filter((x) => all.has(x)),
+        }),
       '設定已儲存',
     )
   }
+
+  const blockIfDirty = () => {
+    if (!dirty) return false
+    alert('改名會直接更新雲端資料。請先按「儲存設定」或「還原」處理目前未儲存的變更，再改名。')
+    return true
+  }
+
+  // ---- 動作 ----
+  const renameExercise = (cat: Category, from: string) => {
+    if (blockIfDirty()) return
+    const to = prompt(`把「${from}」改名為：`, from)?.trim()
+    if (to === undefined || to === from) return
+    const err = validateName(to)
+    if (err) return alert(err)
+    const otherCat = CATEGORIES.find((c) => c !== cat && settings.exercises[c].includes(to)) ??
+      data.workouts.find((w) => w.exercise === to && w.category !== cat)?.category
+    if (otherCat) return alert(`「${to}」屬於「${otherCat}」類別，不能和「${cat}」類別的動作合併。`)
+    const n = data.workouts.filter((w) => w.exercise === from).length
+    const m = data.workouts.filter((w) => w.exercise === to).length
+    const merging = m > 0 || settings.exercises[cat].includes(to)
+    const msg = merging
+      ? `「${to}」已經存在，會把「${from}」的 ${n} 筆紀錄合併進「${to}」（目前 ${m} 筆）。合併後無法自動拆回。確定嗎？`
+      : `把「${from}」改名為「${to}」，會一併更新 ${n} 筆訓練紀錄。確定嗎？`
+    if (!confirm(msg)) return
+    run(async () => {
+      await renameInRecords('exercise', from, to)
+      await saveSettings(renameExerciseInSettings(settings, from, to))
+    }, merging ? '已合併' : '已改名')
+  }
+  const setList = (cat: Category, list: string[]) => setS({ ...s, exercises: { ...s.exercises, [cat]: list } })
+  const move = <T,>(list: T[], i: number, d: number): T[] => {
+    const j = i + d
+    if (j < 0 || j >= list.length) return list
+    const out = [...list]
+    ;[out[i], out[j]] = [out[j], out[i]]
+    return out
+  }
+  const addExercise = (cat: Category) => {
+    const name = (newEx[cat] ?? '').trim()
+    const err = validateName(name)
+    if (err) return alert(err)
+    const where = CATEGORIES.find((c) => s.exercises[c].includes(name))
+    if (where) return alert(`「${name}」已經在「${where}」類別裡了`)
+    setList(cat, [...s.exercises[cat], name])
+    setNewEx({ ...newEx, [cat]: '' })
+  }
+  const toggle = (key: 'unilateral' | 'bodyweight', name: string) =>
+    setS({ ...s, [key]: s[key].includes(name) ? s[key].filter((x) => x !== name) : [...s[key], name] })
+
+  // ---- Cycle 項目 ----
+  const renameItem = (from: string) => {
+    if (blockIfDirty()) return
+    const to = prompt(`把 Cycle 項目「${from}」改名為：`, from)?.trim()
+    if (to === undefined || to === from) return
+    const err = validateName(to)
+    if (err) return alert(err)
+    const n = data.logs.filter((l) => l.item === from).length
+    const m = data.logs.filter((l) => l.item === to).length
+    const merging = m > 0 || settings.cycle_targets.some((t) => t.item === to)
+    const msg = merging
+      ? `「${to}」已經存在，會把「${from}」的 ${n} 筆每日紀錄合併進「${to}」，目標次數沿用「${to}」的設定。確定嗎？`
+      : `把「${from}」改名為「${to}」，會一併更新 ${n} 筆每日紀錄。確定嗎？`
+    if (!confirm(msg)) return
+    run(async () => {
+      await renameInRecords('item', from, to)
+      await saveSettings(renameItemInSettings(settings, from, to))
+    }, merging ? '已合併' : '已改名')
+  }
   const setT = (i: number, patch: Partial<Settings['cycle_targets'][number]>) =>
     setS({ ...s, cycle_targets: s.cycle_targets.map((t, j) => (j === i ? { ...t, ...patch } : t)) })
+  const addItem = () => {
+    const name = newItem.trim()
+    const err = validateName(name)
+    if (err) return alert(err)
+    if (s.cycle_targets.some((t) => t.item === name)) return alert(`「${name}」已經存在`)
+    setS({ ...s, cycle_targets: [...s.cycle_targets, { item: name, target: 1 }] })
+    setNewItem('')
+  }
+  const items = s.cycle_targets.map((t) => t.item)
 
   return (
     <section className="card">
@@ -173,76 +254,76 @@ function SettingsCard({ settings, run }: { settings: Settings; run: PageProps['r
         </label>
       </div>
 
-      <h3>Cycle 目標</h3>
-      <table className="sets targets">
-        <tbody>
-          {s.cycle_targets.map((t, i) => (
-            <tr key={i}>
-              <td>
-                <input value={t.item} onChange={(e) => setT(i, { item: e.target.value })} />
-              </td>
-              <td className="w80">
-                <input inputMode="numeric" value={t.target} onChange={(e) => setT(i, { target: Number(e.target.value) || 0 })} />
-              </td>
-              <td>
-                <button className="x" aria-label="刪除" onClick={() => setS({ ...s, cycle_targets: s.cycle_targets.filter((_, j) => j !== i) })}>
-                  −
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button className="ghost full" onClick={() => setS({ ...s, cycle_targets: [...s.cycle_targets, { item: '', target: 1 }] })}>
-        ＋ 新增項目
-      </button>
-      <p className="muted small">改名會讓舊的每日紀錄對不上，建議新增而不是改名。</p>
+      <h3>Cycle 項目與目標次數</h3>
+      <ul className="edlist">
+        {s.cycle_targets.map((t, i) => (
+          <li key={t.item}>
+            <span className="name">{t.item}</span>
+            <input className="num" inputMode="numeric" value={t.target} onChange={(e) => setT(i, { target: Number(e.target.value) || 0 })} />
+            <span className="muted small">次</span>
+            <button className="ic" title="改名" onClick={() => renameItem(t.item)}>✎</button>
+            <button className="ic" title="上移" onClick={() => setS({ ...s, cycle_targets: move(s.cycle_targets, i, -1) })}>↑</button>
+            <button className="ic" title="下移" onClick={() => setS({ ...s, cycle_targets: move(s.cycle_targets, i, 1) })}>↓</button>
+            <button className="ic" title="移除" onClick={() => setS({ ...s, cycle_targets: s.cycle_targets.filter((_, j) => j !== i) })}>×</button>
+          </li>
+        ))}
+      </ul>
+      <div className="row gap">
+        <input placeholder="新增項目" value={newItem} onChange={(e) => setNewItem(e.target.value)} />
+        <button className="ghost" onClick={addItem}>新增</button>
+      </div>
 
-      <h3>動作清單（一行一個）</h3>
+      <h3>訓練存檔時自動記錄的項目</h3>
+      <div className="maprow">
+        {CATEGORIES.map((c) => (
+          <label key={c}>
+            {c}
+            <select value={s.category_items[c] ?? ''} onChange={(e) => setS({ ...s, category_items: { ...s.category_items, [c]: e.target.value } })}>
+              <option value="">（不記錄）</option>
+              {[...new Set([...items, s.category_items[c]].filter(Boolean))].map((it) => (
+                <option key={it} value={it}>{it}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+
+      <h3>動作清單</h3>
+      <p className="muted small">「單邊」＝左右分開記錄；「自重」＝可記輔助／加重，1RM 含體重（引體類一律是自重）。</p>
       {CATEGORIES.map((c) => (
-        <label key={c}>
-          {c}
-          <textarea rows={Math.max(3, exText[c].split('\n').length)} value={exText[c]} onChange={(e) => setExText({ ...exText, [c]: e.target.value })} />
-        </label>
+        <div key={c} className="excat">
+          <div className="muted small catname">{c}</div>
+          <ul className="edlist">
+            {s.exercises[c].map((name, i) => (
+              <li key={name}>
+                <span className="name">{name}</span>
+                <button className={`flag ${s.unilateral.includes(name) ? 'on' : ''}`} onClick={() => toggle('unilateral', name)}>單邊</button>
+                {c === '引體' ? (
+                  <span className="flag on locked">自重</span>
+                ) : (
+                  <button className={`flag ${s.bodyweight.includes(name) ? 'on' : ''}`} onClick={() => toggle('bodyweight', name)}>自重</button>
+                )}
+                <button className="ic" title="改名" onClick={() => renameExercise(c, name)}>✎</button>
+                <button className="ic" title="上移" onClick={() => setList(c, move(s.exercises[c], i, -1))}>↑</button>
+                <button className="ic" title="下移" onClick={() => setList(c, move(s.exercises[c], i, 1))}>↓</button>
+                <button className="ic" title="從清單移除（紀錄保留）" onClick={() => setList(c, s.exercises[c].filter((x) => x !== name))}>×</button>
+              </li>
+            ))}
+          </ul>
+          <div className="row gap">
+            <input placeholder={`新增${c}動作`} value={newEx[c] ?? ''} onChange={(e) => setNewEx({ ...newEx, [c]: e.target.value })} />
+            <button className="ghost" onClick={() => addExercise(c)}>新增</button>
+          </div>
+        </div>
       ))}
-      <h3>單邊動作（左右分開記錄）</h3>
-      <div className="chips">
-        {[...new Set(CATEGORIES.flatMap((c) => exText[c].split('\n').map((x) => x.trim()).filter(Boolean)))].map((name) => {
-          const on = s.unilateral.includes(name)
-          return (
-            <button
-              key={name}
-              className={`chip ${on ? 'on' : ''}`}
-              onClick={() => setS({ ...s, unilateral: on ? s.unilateral.filter((x) => x !== name) : [...s.unilateral, name] })}
-            >
-              {on ? '✓ ' : ''}
-              {name}
-            </button>
-          )
-        })}
-      </div>
-      <p className="muted small">點選要左右分開記錄的動作。單邊動作會用「左次數／右次數」並排輸入，並顯示左右差。</p>
+      <p className="muted small">✎ 改名會同步更新所有歷史紀錄，改成已存在的名稱＝合併。× 只是從清單移除，歷史紀錄會保留，加回同名動作就會接上。</p>
 
-      <h3>自重動作（可記輔助／加重，1RM 含體重）</h3>
-      <div className="chips">
-        {[...new Set(CATEGORIES.filter((c) => c !== '引體').flatMap((c) => exText[c].split('\n').map((x) => x.trim()).filter(Boolean)))].map((name) => {
-          const on = s.bodyweight.includes(name)
-          return (
-            <button
-              key={name}
-              className={`chip ${on ? 'on' : ''}`}
-              onClick={() => setS({ ...s, bodyweight: on ? s.bodyweight.filter((x) => x !== name) : [...s.bodyweight, name] })}
-            >
-              {on ? '✓ ' : ''}
-              {name}
-            </button>
-          )
-        })}
+      <div className="row gap sticky-save">
+        {dirty && <button className="ghost" onClick={() => setS(settings)}>還原</button>}
+        <button className="primary grow" disabled={!dirty} onClick={save}>
+          {dirty ? '儲存設定' : '設定已是最新'}
+        </button>
       </div>
-      <p className="muted small">「引體」類別的動作一律是自重動作，不在這裡列出。標記後，該動作的進步指標會從總次數改成含體重的估算 1RM（所有歷史紀錄一起重算）。</p>
-      <button className="primary full" disabled={!dirty} onClick={save}>
-        儲存設定
-      </button>
     </section>
   )
 }

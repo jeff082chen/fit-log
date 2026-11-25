@@ -20,6 +20,7 @@ const AI_GUIDE: [string, string][] = [
   ['自重動作', '引體類別的所有動作，以及「設定」頁列為「自重動作」的動作：kg 負數＝輔助公斤數（-20＝輔助 20 kg），0＝自重，正數＝加重。有效負重＝體重＋kg；體重(kg) 欄空白時，用當天或之前最近一次身體組成的體重（更早則用最早一筆）。'],
   ['核心', '每組做到力竭，看次數；俄羅斯轉體記左右合計次數。'],
   ['計算欄', '估算1RM＝max(有效重量×(1＋次數/30))；進步指標＝估算1RM，自重或核心則用總次數；與上次比＝和同動作、同側別的上一筆相比。'],
+  ['名稱', '動作與 Cycle 項目若曾改名，紀錄中的名稱已一併更新；同一名稱即同一動作／項目。'],
   ['每日紀錄', '一列＝某天完成的一個項目；沒有紀錄的日期＝休息。「開始新 Cycle」是手動換輪標記。各項目達到「設定」頁的 Cycle 目標後，下一筆自動進入新的一輪。Cycle 欄是輪次。'],
   ['身體組成', '輸入：日期、體重、體脂率、骨骼肌量。計算：年齡、去脂體重＝體重×(1－體脂率)、FFMI＝去脂體重÷身高²、標準化 FFMI＝FFMI＋6.1×(1.8－身高 m)。身高與出生日期在「設定」頁。'],
 ]
@@ -71,6 +72,7 @@ export function exportXlsx(data: { workouts: Workout[]; logs: DailyLog[]; body: 
   for (const c of CATEGORIES) for (const e of s.exercises[c]) setRows.push(['動作', c, e])
   for (const e of s.unilateral) setRows.push(['單邊動作', '', e])
   for (const e of s.bodyweight) setRows.push(['自重動作', '', e])
+  for (const c of CATEGORIES) setRows.push(['類別對應', c, s.category_items[c]])
   XLSX.utils.book_append_sheet(wb, sheet('設定', ['類型', '名稱', '值'], setRows), '設定')
   XLSX.utils.book_append_sheet(wb, sheet('AI 解析說明', ['項目', '說明'], AI_GUIDE), 'AI解析說明')
   XLSX.writeFile(wb, `fit-log-${todayStr()}.xlsx`, { compression: true })
@@ -210,6 +212,7 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
       if (k === '動作' && name && str(val)) (ex[name] ??= []).push(str(val)!)
       if (k === '單邊動作' && str(val)) uni.push(str(val)!)
       if (k === '自重動作' && str(val)) bwl.push(str(val)!)
+      if (k === '類別對應' && name && str(val) && (CATEGORIES as readonly string[]).includes(name)) out.settings.category_items[name as Category] = str(val)!
     }
     if (uni.length) out.settings.unilateral = uni
     out.settings.bodyweight = bwl
@@ -255,6 +258,7 @@ export function parseJson(text: string): ImportResult {
         ...DEFAULT_SETTINGS, ...j.settings,
         unilateral: j.settings?.unilateral ?? DEFAULT_SETTINGS.unilateral,
         bodyweight: j.settings?.bodyweight ?? DEFAULT_SETTINGS.bodyweight,
+        category_items: { ...DEFAULT_SETTINGS.category_items, ...(j.settings?.category_items ?? {}) },
       },
       workouts: j.workouts ?? [],
       daily_logs: j.daily_logs ?? [],

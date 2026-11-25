@@ -238,17 +238,17 @@ function compress(out: SetEntry[]): SetEntry[] {
 }
 
 function useDailyLog(data: PageProps['data'], category: Category, date: string, editing: boolean) {
-  const item = CATEGORY_TO_ITEM[category]
+  const item = data.settings.category_items[category] ?? CATEGORY_TO_ITEM[category]
   const alreadyLogged = data.logs.some((l) => l.date === date && l.item === item)
   const [logDaily, setLogDaily] = useState(!editing && !alreadyLogged)
   const node =
-    !editing && !alreadyLogged ? (
+    item && !editing && !alreadyLogged ? (
       <label className="check">
         <input type="checkbox" checked={logDaily} onChange={(e) => setLogDaily(e.target.checked)} />
         同時記到每日紀錄（{item}）
       </label>
     ) : null
-  return { item, shouldLog: logDaily && !alreadyLogged && !editing, node }
+  return { item, shouldLog: !!item && logDaily && !alreadyLogged && !editing, node }
 }
 
 function SheetHead({ title, sub, onClose }: { title: string; sub: string; onClose: () => void }) {

@@ -1,4 +1,4 @@
-import { RESET, type BodyMetric, type CycleTarget, type DailyLog, type SetEntry, type Workout } from './types'
+import { RESET, type BodyMetric, type CycleTarget, type DailyLog, type SetEntry, type Settings, type Workout } from './types'
 
 // ---------- 日期 ----------
 export function todayStr(d = new Date()): string {
@@ -319,4 +319,35 @@ export function pairSummary(s: TrainingSession): string {
     return `${k}左 ${l.map((x) => x.reps).join('/')}・右 ${r.map((x) => x.reps).join('/')}`
   }
   return [s.L && `左 ${setsSummary(s.L.sets)}`, s.R && `右 ${setsSummary(s.R.sets)}`].filter(Boolean).join('・')
+}
+
+// ---------- 改名 ----------
+const replaceIn = (list: string[], from: string, to: string) => [...new Set(list.map((x) => (x === from ? to : x)))]
+
+/** 動作改名後的設定（新名稱已存在時＝合併） */
+export function renameExerciseInSettings(s: Settings, from: string, to: string): Settings {
+  const exercises = Object.fromEntries(
+    Object.entries(s.exercises).map(([c, list]) => [c, replaceIn(list, from, to)]),
+  ) as Settings['exercises']
+  return { ...s, exercises, unilateral: replaceIn(s.unilateral, from, to), bodyweight: replaceIn(s.bodyweight, from, to) }
+}
+
+/** Cycle 項目改名後的設定（新名稱已存在時＝合併，保留既有項目的目標次數） */
+export function renameItemInSettings(s: Settings, from: string, to: string): Settings {
+  const exists = s.cycle_targets.some((t) => t.item === to)
+  const cycle_targets = exists
+    ? s.cycle_targets.filter((t) => t.item !== from)
+    : s.cycle_targets.map((t) => (t.item === from ? { ...t, item: to } : t))
+  const category_items = Object.fromEntries(
+    Object.entries(s.category_items).map(([c, it]) => [c, it === from ? to : it]),
+  ) as Settings['category_items']
+  return { ...s, cycle_targets, category_items }
+}
+
+/** 新名稱檢查，回傳錯誤訊息或 null */
+export function validateName(name: string): string | null {
+  if (!name) return '名稱不能是空白'
+  if (name === RESET) return `「${RESET}」是保留字`
+  if (name.startsWith('_')) return '名稱不能以「_」開頭'
+  return null
 }

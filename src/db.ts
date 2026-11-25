@@ -62,15 +62,16 @@ export async function loadSettings(): Promise<Settings> {
     ) as Settings['exercises'],
     unilateral: Array.isArray(data.exercises?._unilateral) ? data.exercises._unilateral : DEFAULT_SETTINGS.unilateral,
     bodyweight: Array.isArray(data.exercises?._bodyweight) ? data.exercises._bodyweight : DEFAULT_SETTINGS.bodyweight,
+    category_items: { ...DEFAULT_SETTINGS.category_items, ...(data.exercises?._category_items ?? {}) },
   }
 }
 
 export async function saveSettings(s: Settings): Promise<void> {
-  const { unilateral, bodyweight, ...rest } = s
+  const { unilateral, bodyweight, category_items, ...rest } = s
   // 單邊／自重動作清單存在 exercises 欄位的 _unilateral／_bodyweight 鍵（不需要改資料表結構）
   const { error } = await supabase.from('settings').upsert({
     ...rest,
-    exercises: { ...rest.exercises, _unilateral: unilateral, _bodyweight: bodyweight },
+    exercises: { ...rest.exercises, _unilateral: unilateral, _bodyweight: bodyweight, _category_items: category_items },
     updated_at: new Date().toISOString(),
   })
   fail(error)
@@ -90,6 +91,15 @@ export async function updateRow<T extends object>(table: Table, id: number, patc
 
 export async function deleteRow(table: Table, id: number): Promise<void> {
   const { error } = await supabase.from(table).delete().eq('id', id)
+  fail(error)
+}
+
+/** 改名：把所有紀錄裡的舊名稱換成新名稱（可重複執行） */
+export async function renameInRecords(kind: 'exercise' | 'item', from: string, to: string): Promise<void> {
+  const { error } =
+    kind === 'exercise'
+      ? await supabase.from('workouts').update({ exercise: to }).eq('exercise', from)
+      : await supabase.from('daily_logs').update({ item: to }).eq('item', from)
   fail(error)
 }
 
