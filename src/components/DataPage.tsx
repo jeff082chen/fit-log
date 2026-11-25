@@ -151,7 +151,10 @@ function SettingsCard({ settings, run }: { settings: Settings; run: PageProps['r
     ) as Settings['exercises']
     const cycle_targets = s.cycle_targets.filter((t) => t.item.trim()).map((t) => ({ item: t.item.trim(), target: Math.max(0, Math.round(t.target)) }))
     const all = new Set(Object.values(exercises).flat())
-    run(() => saveSettings({ ...s, exercises, cycle_targets, unilateral: s.unilateral.filter((x) => all.has(x)) }), '設定已儲存')
+    run(
+      () => saveSettings({ ...s, exercises, cycle_targets, unilateral: s.unilateral.filter((x) => all.has(x)), bodyweight: s.bodyweight.filter((x) => all.has(x)) }),
+      '設定已儲存',
+    )
   }
   const setT = (i: number, patch: Partial<Settings['cycle_targets'][number]>) =>
     setS({ ...s, cycle_targets: s.cycle_targets.map((t, j) => (j === i ? { ...t, ...patch } : t)) })
@@ -219,6 +222,24 @@ function SettingsCard({ settings, run }: { settings: Settings; run: PageProps['r
         })}
       </div>
       <p className="muted small">點選要左右分開記錄的動作。單邊動作會用「左次數／右次數」並排輸入，並顯示左右差。</p>
+
+      <h3>自重動作（可記輔助／加重，1RM 含體重）</h3>
+      <div className="chips">
+        {[...new Set(CATEGORIES.filter((c) => c !== '引體').flatMap((c) => exText[c].split('\n').map((x) => x.trim()).filter(Boolean)))].map((name) => {
+          const on = s.bodyweight.includes(name)
+          return (
+            <button
+              key={name}
+              className={`chip ${on ? 'on' : ''}`}
+              onClick={() => setS({ ...s, bodyweight: on ? s.bodyweight.filter((x) => x !== name) : [...s.bodyweight, name] })}
+            >
+              {on ? '✓ ' : ''}
+              {name}
+            </button>
+          )
+        })}
+      </div>
+      <p className="muted small">「引體」類別的動作一律是自重動作，不在這裡列出。標記後，該動作的進步指標會從總次數改成含體重的估算 1RM（所有歷史紀錄一起重算）。</p>
       <button className="primary full" disabled={!dirty} onClick={save}>
         儲存設定
       </button>

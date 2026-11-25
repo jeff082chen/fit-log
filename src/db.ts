@@ -61,15 +61,18 @@ export async function loadSettings(): Promise<Settings> {
       Object.entries({ ...DEFAULT_SETTINGS.exercises, ...data.exercises }).filter(([k]) => !k.startsWith('_')),
     ) as Settings['exercises'],
     unilateral: Array.isArray(data.exercises?._unilateral) ? data.exercises._unilateral : DEFAULT_SETTINGS.unilateral,
+    bodyweight: Array.isArray(data.exercises?._bodyweight) ? data.exercises._bodyweight : DEFAULT_SETTINGS.bodyweight,
   }
 }
 
 export async function saveSettings(s: Settings): Promise<void> {
-  const { unilateral, ...rest } = s
-  // 單邊動作清單存在 exercises 欄位的 _unilateral 鍵（不需要改資料表結構）
-  const { error } = await supabase
-    .from('settings')
-    .upsert({ ...rest, exercises: { ...rest.exercises, _unilateral: unilateral }, updated_at: new Date().toISOString() })
+  const { unilateral, bodyweight, ...rest } = s
+  // 單邊／自重動作清單存在 exercises 欄位的 _unilateral／_bodyweight 鍵（不需要改資料表結構）
+  const { error } = await supabase.from('settings').upsert({
+    ...rest,
+    exercises: { ...rest.exercises, _unilateral: unilateral, _bodyweight: bodyweight },
+    updated_at: new Date().toISOString(),
+  })
   fail(error)
 }
 

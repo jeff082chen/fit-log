@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { analyzeBody, analyzeWorkouts, assignCycles, latestWeight, todayStr } from './logic'
+import { analyzeBody, analyzeWorkouts, assignCycles, bodyWeightLookup, todayStr } from './logic'
 import {
   CATEGORIES, DEFAULT_SETTINGS, SIDES,
   type BodyMetric, type Category, type DailyLog, type SetEntry, type Settings, type Side, type Workout,
@@ -14,10 +14,10 @@ export interface Dataset {
 
 const AI_GUIDE: [string, string][] = [
   ['通用', '各資料頁第 1 列是標題、第 2 列是表頭、資料從第 3 列開始（pandas：header=1）。用欄位名稱辨識欄位。表頭標「(計算)」的欄位是匯出時算好的值。'],
-  ['訓練頁', '腿／推／拉／引體／核心。一列＝某天一個動作；單邊動作（清單在「設定」頁）左右各一列。欄位：日期、動作、側別（雙／左／右）、組N kg、組N 次數、備註；引體多一欄體重(kg)。'],
+  ['訓練頁', '腿／推／拉／引體／核心。一列＝某天一個動作；單邊動作（清單在「設定」頁）左右各一列。欄位：日期、動作、側別（雙／左／右）、體重(kg)、組N kg、組N 次數、備註。'],
   ['kg 留空', '有次數但 kg 空白＝沿用前一組重量；第一組也空白＝自重（0）。沒填次數＝沒做。'],
   ['重量記法', '啞鈴記單手重量；名稱含「槓鈴」記總重量（含槓）；高腳杯深蹲、仰臥拉舉記單顆重量。'],
-  ['引體', 'kg 負數＝輔助公斤數（-20＝輔助 20 kg），0＝自重，正數＝加重。有效負重＝體重＋kg。'],
+  ['自重動作', '引體類別的所有動作，以及「設定」頁列為「自重動作」的動作：kg 負數＝輔助公斤數（-20＝輔助 20 kg），0＝自重，正數＝加重。有效負重＝體重＋kg；體重(kg) 欄空白時，用當天或之前最近一次身體組成的體重（更早則用最早一筆）。'],
   ['核心', '每組做到力竭，看次數；俄羅斯轉體記左右合計次數。'],
   ['計算欄', '估算1RM＝max(有效重量×(1＋次數/30))；進步指標＝估算1RM，自重或核心則用總次數；與上次比＝和同動作、同側別的上一筆相比。'],
   ['每日紀錄', '一列＝某天完成的一個項目；沒有紀錄的日期＝休息。「開始新 Cycle」是手動換輪標記。各項目達到「設定」頁的 Cycle 目標後，下一筆自動進入新的一輪。Cycle 欄是輪次。'],
@@ -42,18 +42,17 @@ function sheet(title: string, head: string[], rows: Cell[][]): XLSX.WorkSheet {
 export function exportXlsx(data: { workouts: Workout[]; logs: DailyLog[]; body: BodyMetric[]; settings: Settings }): void {
   const wb = XLSX.utils.book_new()
   const s = data.settings
-  const bw = latestWeight(data.body)
-  const rows = analyzeWorkouts(data.workouts, bw)
+  const rows = analyzeWorkouts(data.workouts, bodyWeightLookup(data.body), s.bodyweight)
   for (const cat of CATEGORIES) {
     const list = rows.filter((r) => r.category === cat)
     const n = Math.max(6, ...list.map((r) => r.sets.length))
     const head = ['日期', '動作', '側別']
-    if (cat === '引體') head.push('體重(kg)')
+    head.push('體重(kg)')
     for (let i = 1; i <= n; i++) head.push(`組${i} kg`, `組${i} 次數`)
     head.push('備註', '組數(計算)', '總次數(計算)', '最大重量(計算)', '訓練量(計算)', '估算1RM(計算)', '進步指標(計算)', '與上次比(計算)')
     const data_ = list.map((r) => {
       const row: Cell[] = [toDate(r.date), r.exercise, r.side]
-      if (cat === '引體') row.push(r.body_weight)
+      row.push(r.body_weight)
       for (let i = 0; i < n; i++) row.push(r.sets[i]?.kg ?? null, r.sets[i]?.reps ?? null)
       row.push(r.note, r.m.setCount, r.m.totalReps, r.m.maxKg, r.m.volume, r.m.e1rm, r.m.indicator, r.delta)
       return row
@@ -71,6 +70,7 @@ export function exportXlsx(data: { workouts: Workout[]; logs: DailyLog[]; body: 
   for (const t of s.cycle_targets) setRows.push(['Cycle目標', t.item, t.target])
   for (const c of CATEGORIES) for (const e of s.exercises[c]) setRows.push(['動作', c, e])
   for (const e of s.unilateral) setRows.push(['單邊動作', '', e])
+  for (const e of s.bodyweight) setRows.push(['自重動作', '', e])
   XLSX.utils.book_append_sheet(wb, sheet('設定', ['類型', '名稱', '值'], setRows), '設定')
   XLSX.utils.book_append_sheet(wb, sheet('AI 解析說明', ['項目', '說明'], AI_GUIDE), 'AI解析說明')
   XLSX.writeFile(wb, `fit-log-${todayStr()}.xlsx`, { compression: true })
@@ -201,6 +201,7 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
     const targets: Settings['cycle_targets'] = []
     const ex: Record<string, string[]> = {}
     const uni: string[] = []
+    const bwl: string[] = []
     for (const r of st.rows) {
       const [k, name, val] = [str(r[0]), str(r[1]), r[2]]
       if (k === '身高(cm)' && num(val)) out.settings.height_cm = num(val)!
@@ -208,8 +209,10 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
       if (k === 'Cycle目標' && name) targets.push({ item: name, target: num(val) ?? 0 })
       if (k === '動作' && name && str(val)) (ex[name] ??= []).push(str(val)!)
       if (k === '單邊動作' && str(val)) uni.push(str(val)!)
+      if (k === '自重動作' && str(val)) bwl.push(str(val)!)
     }
     if (uni.length) out.settings.unilateral = uni
+    out.settings.bodyweight = bwl
     if (targets.length) out.settings.cycle_targets = targets
     for (const c of CATEGORIES) if (ex[c]?.length) out.settings.exercises[c] = ex[c]
   } else {
@@ -248,7 +251,11 @@ export function parseJson(text: string): ImportResult {
   if (j.format !== 'fit-log') throw new Error('不是 fit-log 匯出的 JSON 檔')
   return {
     data: {
-      settings: { ...DEFAULT_SETTINGS, ...j.settings, unilateral: j.settings?.unilateral ?? DEFAULT_SETTINGS.unilateral },
+      settings: {
+        ...DEFAULT_SETTINGS, ...j.settings,
+        unilateral: j.settings?.unilateral ?? DEFAULT_SETTINGS.unilateral,
+        bodyweight: j.settings?.bodyweight ?? DEFAULT_SETTINGS.bodyweight,
+      },
       workouts: j.workouts ?? [],
       daily_logs: j.daily_logs ?? [],
       body_metrics: j.body_metrics ?? [],

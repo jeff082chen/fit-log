@@ -56,6 +56,8 @@ export interface Settings {
   exercises: Record<Category, string[]>
   /** 單邊動作（左右分開記錄）的名稱 */
   unilateral: string[]
+  /** 自重動作（有效負重＝體重＋kg，可記輔助／加重）；引體類別一律視為自重動作 */
+  bodyweight: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -79,4 +81,5 @@ export const DEFAULT_SETTINGS: Settings = {
     核心: ['捲腹', '抬腿', '俄羅斯轉體'],
   },
   unilateral: ['保加利亞分腿蹲'],
+  bodyweight: [],
 }

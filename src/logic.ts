@@ -52,11 +52,37 @@ export function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
-/** bodyWeight 只用於引體（有效負重＝體重＋kg） */
-export function workoutMetrics(w: Pick<Workout, 'sets' | 'category'>, bodyWeight: number | null): WorkoutMetrics {
+// ---------- 體重 ----------
+/** 體重來源：固定值，或依日期查詢的函式 */
+export type BWSource = number | null | ((date: string) => number | null)
+const resolveBW = (src: BWSource, date: string) => (typeof src === 'function' ? src(date) : src)
+
+/** 回傳「某天的體重」：當天或之前最近一次量測；更早的日期用最早一筆；沒有資料回傳 null */
+export function bodyWeightLookup(ms: BodyMetric[]): (date: string) => number | null {
+  const list = ms
+    .filter((m) => m.weight !== null)
+    .sort((a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1))
+  return (date) => {
+    if (!list.length) return null
+    let found: BodyMetric | null = null
+    for (const m of list) {
+      if (m.date <= date) found = m
+      else break
+    }
+    return (found ?? list[0]).weight
+  }
+}
+
+/** 自重動作：引體類別一律是；其他類別看設定裡的自重動作清單 */
+export function isBodyweight(category: string, exercise: string, bwExercises: readonly string[] = []): boolean {
+  return category === '引體' || bwExercises.includes(exercise)
+}
+
+/** 自重動作的有效負重＝體重＋kg（輔助為負數） */
+export function workoutMetrics(w: Pick<Workout, 'sets' | 'category'>, bodyWeight: number | null, bodyweightExercise = w.category === '引體'): WorkoutMetrics {
   const eff = effectiveSets(w.sets)
   if (eff.length === 0) return { setCount: 0, totalReps: 0, maxKg: null, volume: 0, e1rm: null, indicator: null }
-  const bw = w.category === '引體' ? bodyWeight ?? 0 : 0
+  const bw = bodyweightExercise ? bodyWeight ?? 0 : 0
   const totalReps = eff.reduce((a, s) => a + s.reps, 0)
   const maxKg = Math.max(...eff.map((s) => s.kg))
   const volume = Math.round(eff.reduce((a, s) => a + (s.kg + bw) * s.reps, 0))
@@ -74,11 +100,11 @@ export interface WorkoutRow extends Workout {
 }
 
 /** 依日期、建立順序排序，計算指標與「與上次比」 */
-export function analyzeWorkouts(ws: Workout[], defaultBW: number | null): WorkoutRow[] {
+export function analyzeWorkouts(ws: Workout[], bwSource: BWSource, bwExercises: readonly string[] = []): WorkoutRow[] {
   const sorted = [...ws].sort((a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1))
   const lastInd = new Map<string, number>()
   return sorted.map((w) => {
-    const m = workoutMetrics(w, w.body_weight ?? defaultBW)
+    const m = workoutMetrics(w, w.body_weight ?? resolveBW(bwSource, w.date), isBodyweight(w.category, w.exercise, bwExercises))
     const key = `${w.exercise}|${w.side}`
     let delta: number | null = null
     if (m.indicator !== null) {
@@ -216,12 +242,13 @@ export interface BestSet {
 
 /** 歷史中重量最重、次數最多、容量（重量×次數）最大的一組 */
 export function bestSets(
-  rows: Pick<Workout, 'date' | 'side' | 'sets' | 'category' | 'body_weight'>[],
-  defaultBW: number | null,
+  rows: Pick<Workout, 'date' | 'side' | 'sets' | 'category' | 'exercise' | 'body_weight'>[],
+  bwSource: BWSource,
+  bwExercises: readonly string[] = [],
 ): { heaviest: BestSet; mostReps: BestSet; maxVolume: BestSet | null } | null {
   const all: BestSet[] = []
   for (const r of rows) {
-    const bw = r.category === '引體' ? r.body_weight ?? defaultBW ?? 0 : 0
+    const bw = isBodyweight(r.category, r.exercise, bwExercises) ? r.body_weight ?? resolveBW(bwSource, r.date) ?? 0 : 0
     for (const s of effectiveSets(r.sets)) {
       const load = s.kg + bw
       all.push({ date: r.date, side: r.side, kg: s.kg, reps: s.reps, load, volume: load * s.reps })

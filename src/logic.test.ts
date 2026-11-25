@@ -111,3 +111,36 @@ describe('單邊動作', () => {
     expect(pairSummary(ss[1])).toBe('左 12kg × 8')
   })
 })
+
+describe('體重依日期、自重動作', () => {
+  it('取當天或之前最近一次體重，更早用最早一筆', async () => {
+    const { bodyWeightLookup } = await import('./logic')
+    const f = bodyWeightLookup([
+      { id: 1, date: '2026-10-01', weight: 67.2, body_fat_pct: null, smm: null },
+      { id: 2, date: '2026-11-24', weight: 66.6, body_fat_pct: null, smm: null },
+      { id: 3, date: '2026-11-10', weight: null, body_fat_pct: null, smm: null },
+    ])
+    expect([f('2026-09-01'), f('2026-10-01'), f('2026-11-23'), f('2026-11-24'), f('2027-01-01')]).toEqual([67.2, 67.2, 67.2, 66.6, 66.6])
+    expect(bodyWeightLookup([])('2026-01-01')).toBeNull()
+  })
+  it('引體用當天體重；有填體重以填的為準', async () => {
+    const { bodyWeightLookup } = await import('./logic')
+    const f = bodyWeightLookup([
+      { id: 1, date: '2026-10-01', weight: 70, body_fat_pct: null, smm: null },
+      { id: 2, date: '2026-11-24', weight: 60, body_fat_pct: null, smm: null },
+    ])
+    const rows = analyzeWorkouts([
+      W(1, '2026-10-05', '輔助反握引體', '雙', [{ kg: -20, reps: 5 }], '引體'),
+      W(2, '2026-11-25', '輔助反握引體', '雙', [{ kg: -20, reps: 5 }], '引體'),
+      W(3, '2026-11-26', '輔助反握引體', '雙', [{ kg: -20, reps: 5 }], '引體', 65),
+    ], f)
+    expect(rows.map((r) => r.m.e1rm)).toEqual([58.3, 46.7, 52.5])
+  })
+  it('標記為自重動作的伏地挺身改用含體重 1RM，未標記維持總次數', () => {
+    const w = [W(1, '2026-11-24', '伏地挺身', '雙', [{ kg: null, reps: 15 }, { kg: null, reps: 12 }], '推')]
+    expect(analyzeWorkouts(w, 66.6)[0].m.indicator).toBe(27)
+    expect(analyzeWorkouts(w, 66.6, ['伏地挺身'])[0].m.e1rm).toBe(99.9)
+    expect(bestSets(w, 66.6, ['伏地挺身'])!.maxVolume!.volume).toBeCloseTo(999)
+    expect(bestSets(w, 66.6)!.maxVolume).toBeNull()
+  })
+})

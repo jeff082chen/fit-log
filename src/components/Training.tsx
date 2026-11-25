@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { PageProps } from '../App'
 import { deleteRow, insertRows, updateRow } from '../db'
 import {
-  analyzeWorkouts, bestSets, fmtDate, IMBALANCE_ALERT, imbalance, latestWeight, pairSummary, sessionsOf, todayStr,
+  analyzeWorkouts, bestSets, bodyWeightLookup, fmtDate, IMBALANCE_ALERT, imbalance, isBodyweight, pairSummary, sessionsOf, todayStr,
   type BestSet, type TrainingSession, type WorkoutRow,
 } from '../logic'
 import { CATEGORIES, CATEGORY_TO_ITEM, type Category, type SetEntry, type Side } from '../types'
@@ -22,8 +22,9 @@ export default function Training(props: PageProps) {
   const [date, setDate] = useState(today)
   const [cat, setCat] = useState<Category>(() => (sessionStorage.getItem('fitlog.cat') as Category) || '腿')
   const [editor, setEditor] = useState<EditorState | null>(null)
-  const bw = latestWeight(data.body)
-  const rows = useMemo(() => analyzeWorkouts(data.workouts, bw), [data.workouts, bw])
+  const bwAt = useMemo(() => bodyWeightLookup(data.body), [data.body])
+  const bwList = data.settings.bodyweight
+  const rows = useMemo(() => analyzeWorkouts(data.workouts, bwAt, bwList), [data.workouts, bwAt, bwList])
   const uni = useMemo(() => new Set(data.settings.unilateral), [data.settings.unilateral])
 
   const pickCat = (c: Category) => {
@@ -115,7 +116,7 @@ export default function Training(props: PageProps) {
             st={editor}
             date={date}
             rows={rows}
-            defaultBW={bw}
+            bwAt={bwAt}
             onClose={() => setEditor(null)}
           />
         ) : (
@@ -125,7 +126,7 @@ export default function Training(props: PageProps) {
             st={editor}
             date={date}
             rows={rows}
-            defaultBW={bw}
+            bwAt={bwAt}
             onClose={() => setEditor(null)}
           />
         ))}
@@ -207,7 +208,7 @@ interface EditorProps extends PageProps {
   st: EditorState
   date: string
   rows: WorkoutRow[]
-  defaultBW: number | null
+  bwAt: (date: string) => number | null
   onClose: () => void
 }
 
@@ -267,9 +268,10 @@ function SheetHead({ title, sub, onClose }: { title: string; sub: string; onClos
 // ---------- 雙邊動作 ----------
 type Draft = { kg: string; reps: string }[]
 
-function BilateralEditor({ data, st, date, rows, defaultBW, onClose, run }: EditorProps) {
+function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorProps) {
   const { exercise, category, editRow: editing } = st
-  const isPull = category === '引體'
+  const isPull = isBodyweight(category, exercise, data.settings.bodyweight)
+  const defaultBW = bwAt(editing?.date ?? date)
   const hist = rows.filter((r) => r.exercise === exercise)
   const prev = editing ?? hist[hist.length - 1]
   const initSets: SetEntry[] = prev?.sets.length ? prev.sets : [{ kg: null, reps: null }, { kg: null, reps: null }, { kg: null, reps: null }]
@@ -354,7 +356,7 @@ function BilateralEditor({ data, st, date, rows, defaultBW, onClose, run }: Edit
           {editing && <button className="danger" onClick={remove}>刪除</button>}
           <button className="primary grow" onClick={save}>儲存</button>
         </div>
-        <HistoryBlock hist={hist} unilateral={false} defaultBW={defaultBW} isPull={isPull} />
+        <HistoryBlock hist={hist} unilateral={false} bwAt={bwAt} bwList={data.settings.bodyweight} isBW={isPull} />
       </div>
     </div>
   )
@@ -363,7 +365,7 @@ function BilateralEditor({ data, st, date, rows, defaultBW, onClose, run }: Edit
 // ---------- 單邊動作 ----------
 type UDraft = { kg: string; kgR: string; l: string; r: string }[]
 
-function UnilateralEditor({ data, st, date, rows, defaultBW, onClose, run }: EditorProps) {
+function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorProps) {
   const { exercise, category, editDate } = st
   const editing = editDate !== null
   const hist = rows.filter((r) => r.exercise === exercise)
@@ -485,18 +487,24 @@ function UnilateralEditor({ data, st, date, rows, defaultBW, onClose, run }: Edi
           {editing && <button className="danger" onClick={remove}>刪除</button>}
           <button className="primary grow" onClick={save}>儲存左右</button>
         </div>
-        <HistoryBlock hist={hist} unilateral defaultBW={defaultBW} isPull={false} />
+        <HistoryBlock hist={hist} unilateral bwAt={bwAt} bwList={data.settings.bodyweight} isBW={isBodyweight(category, exercise, data.settings.bodyweight)} />
       </div>
     </div>
   )
 }
 
 // ---------- 個人紀錄、趨勢、歷史 ----------
-function HistoryBlock({ hist, unilateral, defaultBW, isPull }: { hist: WorkoutRow[]; unilateral: boolean; defaultBW: number | null; isPull: boolean }) {
+function HistoryBlock({ hist, unilateral, bwAt, bwList, isBW }: {
+  hist: WorkoutRow[]
+  unilateral: boolean
+  bwAt: (date: string) => number | null
+  bwList: string[]
+  isBW: boolean
+}) {
   if (!hist.length) return null
   const sides: Side[] = unilateral ? ['左', '右'] : ['雙']
   const pick = (s: Side) => (unilateral ? hist.filter((r) => r.side === s) : hist)
-  const recs = sides.map((s) => bestSets(pick(s), defaultBW))
+  const recs = sides.map((s) => bestSets(pick(s), bwAt, bwList))
   const series = sides
     .map((s, i) => ({
       name: unilateral ? `${s}側` : hist[0].exercise,
@@ -525,7 +533,7 @@ function HistoryBlock({ hist, unilateral, defaultBW, isPull }: { hist: WorkoutRo
                   <tr key={k}>
                     <td className="muted">{labels[k]}</td>
                     {recs.map((r, i) => (
-                      <td key={i}>{r?.[k] ? <RecCell r={r[k]!} isPull={isPull} volume={k === 'maxVolume'} /> : '—'}</td>
+                      <td key={i}>{r?.[k] ? <RecCell r={r[k]!} isBW={isBW} volume={k === 'maxVolume'} /> : '—'}</td>
                     ))}
                   </tr>
                 ) : null,
@@ -561,8 +569,8 @@ function HistoryBlock({ hist, unilateral, defaultBW, isPull }: { hist: WorkoutRo
   )
 }
 
-function RecCell({ r, isPull, volume }: { r: BestSet; isPull: boolean; volume: boolean }) {
-  const kg = r.kg < 0 ? `輔助${-r.kg}` : r.kg > 0 ? `${r.kg}kg` : isPull ? '自重' : '自重'
+function RecCell({ r, isBW, volume }: { r: BestSet; isBW: boolean; volume: boolean }) {
+  const kg = r.kg < 0 ? `輔助${-r.kg}` : r.kg > 0 ? `${isBW ? '+' : ''}${r.kg}kg` : '自重'
   return (
     <div>
       <div>
