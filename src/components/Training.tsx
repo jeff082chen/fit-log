@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react'
 import type { PageProps } from '../App'
 import { deleteRow, insertRows, updateRow } from '../db'
 import {
-  analyzeWorkouts, bestSets, bodyWeightLookup, fmtDate, IMBALANCE_ALERT, imbalance, isBodyweight, pairSummary, sessionsOf, todayStr,
+  analyzeWorkouts, bestSets, bodyWeightLookup, cascadeKg, fmtDate, IMBALANCE_ALERT, imbalance, isBodyweight, pairSummary, sessionsOf,
   type BestSet, type TrainingSession, type WorkoutRow,
 } from '../logic'
 import { CATEGORIES, CATEGORY_TO_ITEM, type Category, type SetEntry, type Side } from '../types'
 import LineChart from './LineChart'
+import { useRecordDate } from '../hooks'
 
 /** 編輯中的目標：單邊動作以「日期」為單位（左右一起），雙邊動作以「一筆紀錄」為單位 */
 interface EditorState {
@@ -18,8 +19,7 @@ interface EditorState {
 
 export default function Training(props: PageProps) {
   const { data } = props
-  const today = todayStr()
-  const [date, setDate] = useState(today)
+  const [date, setDate, today] = useRecordDate()
   const [cat, setCat] = useState<Category>(() => (sessionStorage.getItem('fitlog.cat') as Category) || '腿')
   const [editor, setEditor] = useState<EditorState | null>(null)
   const bwAt = useMemo(() => bodyWeightLookup(data.body), [data.body])
@@ -31,12 +31,13 @@ export default function Training(props: PageProps) {
     setCat(c)
     sessionStorage.setItem('fitlog.cat', c)
   }
-  const open = (exercise: string, category: Category, row?: WorkoutRow) =>
-    setEditor(
-      uni.has(exercise)
-        ? { exercise, category, editDate: row ? row.date : null, editRow: null }
-        : { exercise, category, editDate: null, editRow: row ?? null },
-    )
+  const open = (exercise: string, category: Category, row?: WorkoutRow) => {
+    if (uni.has(exercise)) {
+      // 單邊動作同一天只有一組左右紀錄：當天已記過就直接打開編輯
+      const done = rows.some((r) => r.exercise === exercise && r.date === date && r.side !== '雙')
+      setEditor({ exercise, category, editDate: row ? row.date : done ? date : null, editRow: null })
+    } else setEditor({ exercise, category, editDate: null, editRow: row ?? null })
+  }
 
   const exercises = data.settings.exercises[cat] ?? []
   const extra = [...new Set(rows.filter((r) => r.category === cat && !exercises.includes(r.exercise)).map((r) => r.exercise))]
@@ -53,8 +54,14 @@ export default function Training(props: PageProps) {
       <section className="card">
         <div className="row between">
           <h2>訓練紀錄</h2>
-          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value || today)} />
+          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
         </div>
+        {date !== today && (
+          <div className="row between not-today">
+            <span>⚠ 正在記錄 {fmtDate(date)}（不是今天）</span>
+            <button className="ghost small-btn" onClick={() => setDate(today)}>回到今天</button>
+          </div>
+        )}
         <div className="seg">
           {CATEGORIES.map((c) => (
             <button key={c} className={c === cat ? 'on' : ''} onClick={() => pickCat(c)}>
@@ -218,7 +225,7 @@ const parse = (v: string): number | null => {
 }
 
 /** 上次各組的有效重量（絕對值）與次數，用來顯示灰字 */
-function hintsOf(sets: SetEntry[] | undefined) {
+function hintsOf(sets: SetEntry[] | undefined): { kg: number; reps: number | null }[] {
   let last = 0
   return (sets ?? []).map((s) => {
     if (s.kg !== null) last = s.kg
@@ -236,6 +243,8 @@ function compress(out: SetEntry[]): SetEntry[] {
   while (out.length && (out[out.length - 1].reps === null || out[out.length - 1].reps === 0)) out.pop()
   return out
 }
+
+const fmtKg = (v: number | null, bodyweightOnly: boolean) => (v === null || (v === 0 && bodyweightOnly) ? (bodyweightOnly ? '自重' : '') : String(v))
 
 function useDailyLog(data: PageProps['data'], category: Category, date: string, editing: boolean) {
   const item = data.settings.category_items[category] ?? CATEGORY_TO_ITEM[category]
@@ -266,41 +275,43 @@ function SheetHead({ title, sub, onClose }: { title: string; sub: string; onClos
 }
 
 // ---------- 雙邊動作 ----------
-type Draft = { kg: string; reps: string }[]
+/** 一組的輸入；hk／hr 是這一組上次的 kg／次數（灰字），跟著這一列走，刪掉別組也不會錯位 */
+type Row = { kg: string; reps: string; hk: number | null; hr: number | null }
 
 function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorProps) {
   const { exercise, category, editRow: editing } = st
-  const isPull = isBodyweight(category, exercise, data.settings.bodyweight)
+  const isBW = isBodyweight(category, exercise, data.settings.bodyweight)
   const defaultBW = bwAt(editing?.date ?? date)
   const hist = rows.filter((r) => r.exercise === exercise)
   const prev = editing ?? hist[hist.length - 1]
   const initSets: SetEntry[] = prev?.sets.length ? prev.sets : [{ kg: null, reps: null }, { kg: null, reps: null }, { kg: null, reps: null }]
-  const [assist, setAssist] = useState(() => (isPull ? !initSets.some((s) => s.kg !== null && s.kg > 0) : false))
-  const [sets, setSets] = useState<Draft>(() =>
-    initSets.map((s) =>
+  const [assist, setAssist] = useState(() => (isBW ? !initSets.some((s) => s.kg !== null && s.kg > 0) : false))
+  const [sets, setSets] = useState<Row[]>(() => {
+    const h = editing ? [] : hintsOf(prev?.sets)
+    return initSets.map((s, i) =>
       editing
-        ? { kg: s.kg === null ? '' : String(isPull ? Math.abs(s.kg) : s.kg), reps: s.reps === null ? '' : String(s.reps) }
-        : { kg: '', reps: '' },
-    ),
-  )
-  const [hints] = useState(() => (editing ? [] : hintsOf(prev?.sets)))
-  const bodyweightOnly = category === '核心' || (hints.length > 0 && hints.every((h) => h.kg === 0))
+        ? { kg: s.kg === null ? '' : String(isBW ? Math.abs(s.kg) : s.kg), reps: s.reps === null ? '' : String(s.reps), hk: null, hr: null }
+        : { kg: '', reps: '', hk: h[i]?.kg ?? null, hr: h[i]?.reps ?? null },
+    )
+  })
+  const bodyweightOnly = category === '核心' || (!editing && !!prev && hintsOf(prev.sets).every((h) => h.kg === 0))
   const [note, setNote] = useState(editing?.note ?? '')
   const [bodyW, setBodyW] = useState(editing?.body_weight != null ? String(editing.body_weight) : '')
   const daily = useDailyLog(data, category, date, !!editing)
+  const effKg = cascadeKg(sets.map((s) => parse(s.kg)), sets.map((s) => s.hk))
 
   const save = async () => {
     const out = compress(
       sets.map((s, i) => {
-        let kg = parse(s.kg) ?? (hints[i] ? hints[i].kg : null)
-        if (kg !== null && isPull) kg = assist ? -Math.abs(kg) : Math.abs(kg)
-        return { kg, reps: parse(s.reps) ?? hints[i]?.reps ?? null }
+        let kg = effKg[i]
+        if (kg !== null && isBW) kg = assist ? -Math.abs(kg) : Math.abs(kg)
+        return { kg, reps: parse(s.reps) ?? s.hr }
       }),
     )
     if (!out.length) return alert('至少要填一組次數')
     const payload = {
       date: editing?.date ?? date, category, exercise, side: editing?.side ?? ('雙' as Side),
-      sets: out, note: note.trim() || null, body_weight: isPull ? parse(bodyW) : null,
+      sets: out, note: note.trim() || null, body_weight: isBW ? parse(bodyW) : null,
     }
     const ok = await run(async () => {
       if (editing) await updateRow('workouts', editing.id, payload)
@@ -313,13 +324,12 @@ function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPro
     if (editing && confirm('刪除這筆紀錄？')) run(() => deleteRow('workouts', editing.id), '已刪除').then((ok) => ok && onClose())
   }
   const upd = (i: number, k: 'kg' | 'reps', v: string) => setSets((ss) => ss.map((s, j) => (j === i ? { ...s, [k]: v } : s)))
-  const kgPh = (i: number) => (hints[i] ? (bodyweightOnly ? '自重' : String(hints[i].kg)) : i > 0 ? '同上' : bodyweightOnly ? '自重' : '')
 
   return (
     <div className="sheet-bg" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <SheetHead title={exercise} sub={`${editing ? `編輯 ${fmtDate(editing.date)}` : fmtDate(date)}・${category}`} onClose={onClose} />
-        {isPull && (
+        {isBW && (
           <div className="row gap">
             <div className="seg small grow">
               <button className={assist ? 'on' : ''} onClick={() => setAssist(true)}>輔助</button>
@@ -332,7 +342,7 @@ function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPro
           <thead>
             <tr>
               <th>組</th>
-              <th>{isPull ? (assist ? '輔助 kg' : '加重 kg') : 'kg'}</th>
+              <th>{isBW ? (assist ? '輔助 kg' : '加重 kg') : 'kg'}</th>
               <th>次數</th>
               <th />
             </tr>
@@ -341,29 +351,29 @@ function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPro
             {sets.map((s, i) => (
               <tr key={i}>
                 <td className="muted">{i + 1}</td>
-                <td><input inputMode="decimal" value={s.kg} placeholder={kgPh(i)} onChange={(e) => upd(i, 'kg', e.target.value)} /></td>
-                <td><input inputMode="numeric" value={s.reps} placeholder={hints[i]?.reps?.toString() ?? ''} onChange={(e) => upd(i, 'reps', e.target.value)} /></td>
+                <td><input inputMode="decimal" value={s.kg} placeholder={fmtKg(effKg[i], bodyweightOnly)} onChange={(e) => upd(i, 'kg', e.target.value)} /></td>
+                <td><input inputMode="numeric" value={s.reps} placeholder={s.hr?.toString() ?? ''} onChange={(e) => upd(i, 'reps', e.target.value)} /></td>
                 <td><button className="x" onClick={() => setSets((ss) => ss.filter((_, j) => j !== i))} aria-label="刪除這組">−</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-        <button className="ghost full" onClick={() => setSets((ss) => [...ss, { kg: '', reps: '' }])}>＋ 加一組</button>
-        {!editing && <p className="muted small">灰字是上次的重量和次數，留空就照上次儲存；新增的組 kg 留空＝同上一組。</p>}
+        <button className="ghost full" onClick={() => setSets((ss) => [...ss, { kg: '', reps: '', hk: null, hr: null }])}>＋ 加一組</button>
+        <p className="muted small">灰字＝留空時會存的值：次數是上次的次數；kg 是上次的重量，改了某一組的 kg，下面留空的組會跟著改。</p>
         <input placeholder="備註（選填）" value={note} onChange={(e) => setNote(e.target.value)} />
         {daily.node}
         <div className="row gap">
           {editing && <button className="danger" onClick={remove}>刪除</button>}
           <button className="primary grow" onClick={save}>儲存</button>
         </div>
-        <HistoryBlock hist={hist} unilateral={false} bwAt={bwAt} bwList={data.settings.bodyweight} isBW={isPull} />
+        <HistoryBlock hist={hist} unilateral={false} bwAt={bwAt} bwList={data.settings.bodyweight} isBW={isBW} />
       </div>
     </div>
   )
 }
 
 // ---------- 單邊動作 ----------
-type UDraft = { kg: string; kgR: string; l: string; r: string }[]
+type URow = { kg: string; kgR: string; l: string; r: string; hkL: number | null; hkR: number | null; hrL: number | null; hrR: number | null }
 
 function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorProps) {
   const { exercise, category, editDate } = st
@@ -373,40 +383,43 @@ function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPr
   const prevL = editing ? target!.L : lastOfSide(hist, '左')
   const prevR = editing ? target!.R : lastOfSide(hist, '右')
   const n = Math.max(prevL?.sets.length ?? 0, prevR?.sets.length ?? 0) || 3
-  const [hL] = useState(() => (editing ? [] : hintsOf(prevL?.sets)))
-  const [hR] = useState(() => (editing ? [] : hintsOf(prevR?.sets)))
   const [split, setSplit] = useState(() => {
     const a = hintsOf(prevL?.sets)
     const b = hintsOf(prevR?.sets)
     return a.some((h, i) => b[i] && b[i].kg !== h.kg)
   })
-  const [sets, setSets] = useState<UDraft>(() =>
-    Array.from({ length: n }, (_, i) => {
-      if (!editing) return { kg: '', kgR: '', l: '', r: '' }
-      const l = prevL?.sets[i]
-      const r = prevR?.sets[i]
+  const [sets, setSets] = useState<URow[]>(() => {
+    const hL = editing ? [] : hintsOf(prevL?.sets)
+    const hR = editing ? [] : hintsOf(prevR?.sets)
+    return Array.from({ length: n }, (_, i) => {
+      const l = editing ? prevL?.sets[i] : undefined
+      const r = editing ? prevR?.sets[i] : undefined
       return {
         kg: l?.kg != null ? String(l.kg) : '',
         kgR: r?.kg != null ? String(r.kg) : '',
         l: l?.reps != null ? String(l.reps) : '',
         r: r?.reps != null ? String(r.reps) : '',
+        hkL: hL[i]?.kg ?? null,
+        hkR: hR[i]?.kg ?? null,
+        hrL: hL[i]?.reps ?? null,
+        hrR: hR[i]?.reps ?? null,
       }
-    }),
-  )
+    })
+  })
   const [note, setNote] = useState(editing ? prevL?.note ?? prevR?.note ?? '' : '')
   const daily = useDailyLog(data, category, date, editing)
   const sessions = sessionsOf(hist)
   const lastS = editing ? null : sessions[sessions.length - 1]
   const lastIm = lastS ? imbalance(lastS) : null
+  const effL = cascadeKg(sets.map((s) => parse(s.kg)), sets.map((s) => s.hkL))
+  const effR = cascadeKg(sets.map((s) => parse(split ? s.kgR : s.kg)), sets.map((s) => s.hkR))
 
   const build = (side: '左' | '右'): SetEntry[] => {
-    const h = side === '左' ? hL : hR
+    const eff = side === '左' ? effL : effR
     return compress(
       sets.map((s, i) => {
-        const typed = parse(side === '右' && split ? s.kgR : s.kg)
-        const kg = typed ?? (h[i] ? h[i].kg : null)
-        const reps = parse(side === '左' ? s.l : s.r) ?? h[i]?.reps ?? null
-        return { kg, reps: reps === 0 ? null : reps }
+        const reps = parse(side === '左' ? s.l : s.r) ?? (side === '左' ? s.hrL : s.hrR)
+        return { kg: eff[i], reps: reps === 0 ? null : reps }
       }),
     )
   }
@@ -437,9 +450,8 @@ function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPr
       if (prevR) await deleteRow('workouts', prevR.id)
     }, '已刪除').then((ok) => ok && onClose())
   }
-  const upd = (i: number, k: keyof UDraft[number], v: string) => setSets((ss) => ss.map((s, j) => (j === i ? { ...s, [k]: v } : s)))
-  const ph = (h: { kg: number; reps: number | null }[], i: number, k: 'kg' | 'reps') =>
-    h[i] ? (k === 'kg' ? String(h[i].kg) : h[i].reps?.toString() ?? '') : k === 'kg' && i > 0 ? '同上' : ''
+  const upd = (i: number, k: 'kg' | 'kgR' | 'l' | 'r', v: string) => setSets((ss) => ss.map((s, j) => (j === i ? { ...s, [k]: v } : s)))
+  const kgPh = (eff: (number | null)[], i: number) => (eff[i] === null ? '' : String(eff[i]))
 
   return (
     <div className="sheet-bg" onClick={onClose}>
@@ -467,20 +479,20 @@ function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPr
             {sets.map((s, i) => (
               <tr key={i}>
                 <td className="muted">{i + 1}</td>
-                <td><input inputMode="decimal" value={s.kg} placeholder={ph(hL, i, 'kg')} onChange={(e) => upd(i, 'kg', e.target.value)} /></td>
-                {split && <td><input inputMode="decimal" value={s.kgR} placeholder={ph(hR, i, 'kg')} onChange={(e) => upd(i, 'kgR', e.target.value)} /></td>}
-                <td><input inputMode="numeric" value={s.l} placeholder={ph(hL, i, 'reps')} onChange={(e) => upd(i, 'l', e.target.value)} /></td>
-                <td><input inputMode="numeric" value={s.r} placeholder={ph(hR, i, 'reps')} onChange={(e) => upd(i, 'r', e.target.value)} /></td>
+                <td><input inputMode="decimal" value={s.kg} placeholder={kgPh(effL, i)} onChange={(e) => upd(i, 'kg', e.target.value)} /></td>
+                {split && <td><input inputMode="decimal" value={s.kgR} placeholder={kgPh(effR, i)} onChange={(e) => upd(i, 'kgR', e.target.value)} /></td>}
+                <td><input inputMode="numeric" value={s.l} placeholder={s.hrL?.toString() ?? ''} onChange={(e) => upd(i, 'l', e.target.value)} /></td>
+                <td><input inputMode="numeric" value={s.r} placeholder={s.hrR?.toString() ?? ''} onChange={(e) => upd(i, 'r', e.target.value)} /></td>
                 <td><button className="x" onClick={() => setSets((ss) => ss.filter((_, j) => j !== i))} aria-label="刪除這組">−</button></td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="row gap">
-          <button className="ghost grow" onClick={() => setSets((ss) => [...ss, { kg: '', kgR: '', l: '', r: '' }])}>＋ 加一組</button>
+          <button className="ghost grow" onClick={() => setSets((ss) => [...ss, { kg: '', kgR: '', l: '', r: '', hkL: null, hkR: null, hrL: null, hrR: null }])}>＋ 加一組</button>
           <button className="ghost" onClick={() => setSplit(!split)}>{split ? '左右同重量' : '左右不同重量'}</button>
         </div>
-        {!editing && <p className="muted small">灰字是上次左右各組的重量和次數，留空就照上次儲存；某側這組沒做就填 0。</p>}
+        <p className="muted small">灰字＝留空時會存的值（上次的重量和次數；改了某組 kg，下面留空的組會跟著改）。某側這組沒做就填 0。</p>
         <input placeholder="備註（選填）" value={note} onChange={(e) => setNote(e.target.value)} />
         {daily.node}
         <div className="row gap">

@@ -203,3 +203,5 @@ details.card summary h2 { display: inline; }
 select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; font-size: 15px; margin-top: 4px; }
 .sticky-save { position: sticky; bottom: calc(62px + env(safe-area-inset-bottom)); background: var(--card); padding: 8px 0 2px; }
 .row .ghost, .row .primary, .row .danger { white-space: nowrap; }
+.not-today { background: var(--warn-soft); color: var(--warn); padding: 6px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+.small-btn { padding: 5px 10px; font-size: 13px; }

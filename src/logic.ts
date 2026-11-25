@@ -137,10 +137,11 @@ export interface LogRow extends DailyLog {
 /** 依日期與建立順序分配輪次（與 Excel 版規則相同） */
 export function assignCycles(logs: DailyLog[], targets: CycleTarget[]): LogRow[] {
   const sorted = [...logs].sort((a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1))
-  const active = targets.filter((t) => t.item)
+  const active = targets.filter((t) => t.item && t.target > 0)
   let cur = 0
   let counts = new Map<string, number>()
-  const complete = () => active.every((t) => (counts.get(t.item) ?? 0) >= t.target)
+  // 沒有任何目標時不會自動換輪（只能手動「開始新 Cycle」）
+  const complete = () => active.length > 0 && active.every((t) => (counts.get(t.item) ?? 0) >= t.target)
   return sorted.map((l) => {
     if (cur === 0) cur = 1
     else if (l.item === RESET || complete()) {
@@ -201,7 +202,7 @@ export function cycleInfo(rows: LogRow[], targets: CycleTarget[], cycle: number,
     restDays: days === null ? null : Math.max(0, days - trainingDays),
     items,
     completion: totalT ? doneT / totalT : 0,
-    complete: items.every((i) => i.done >= i.target),
+    complete: items.some((i) => i.target > 0) && items.every((i) => i.done >= i.target),
     notStarted: items.filter((i) => i.done === 0).map((i) => i.item),
   }
 }
@@ -350,4 +351,23 @@ export function validateName(name: string): string | null {
   if (name === RESET) return `「${RESET}」是保留字`
   if (name.startsWith('_')) return '名稱不能以「_」開頭'
   return null
+}
+
+// ---------- 輸入表單 ----------
+/**
+ * 每組實際使用的 kg：自己有填就用填的；上面任一組有填過，就沿用上一組；
+ * 否則用上次同一組的值（灰字）；都沒有就沿用上一組。
+ */
+export function cascadeKg(typed: (number | null)[], hints: (number | null)[]): (number | null)[] {
+  const out: (number | null)[] = []
+  let typedAbove = false
+  for (let i = 0; i < typed.length; i++) {
+    const prev = i > 0 ? out[i - 1] : null
+    if (typed[i] !== null) {
+      out.push(typed[i])
+      typedAbove = true
+    } else if (typedAbove) out.push(prev)
+    else out.push(hints[i] ?? prev)
+  }
+  return out
 }

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { PageProps } from '../App'
 import { deleteRow, insertRows } from '../db'
-import { analyzeBody, daysBetween, fmtDate, todayStr } from '../logic'
+import { useRecordDate } from '../hooks'
+import { analyzeBody, daysBetween, fmtDate } from '../logic'
 import LineChart from './LineChart'
 
 const RANGES = [
@@ -12,10 +13,10 @@ const RANGES = [
 ]
 
 export default function Body({ data, run }: PageProps) {
-  const today = todayStr()
+  const [date, setDate, today] = useRecordDate()
   const { height_cm, birth_date } = data.settings
   const rows = useMemo(() => analyzeBody(data.body, height_cm, birth_date), [data.body, height_cm, birth_date])
-  const [form, setForm] = useState({ date: today, weight: '', pbf: '', smm: '' })
+  const [form, setForm] = useState({ weight: '', pbf: '', smm: '' })
   const [range, setRange] = useState(1)
   const last = rows[rows.length - 1]
   const inRange = rows.filter((r) => daysBetween(r.date, today) <= RANGES[range].days)
@@ -30,10 +31,10 @@ export default function Body({ data, run }: PageProps) {
     const weight = num(form.weight)
     if (weight === null) return alert('請填體重')
     const ok = await run(
-      () => insertRows('body_metrics', [{ date: form.date, weight, body_fat_pct: num(form.pbf), smm: num(form.smm) }]),
+      () => insertRows('body_metrics', [{ date, weight, body_fat_pct: num(form.pbf), smm: num(form.smm) }]),
       '已儲存',
     )
-    if (ok) setForm({ date: today, weight: '', pbf: '', smm: '' })
+    if (ok) setForm({ weight: '', pbf: '', smm: '' })
   }
 
   const pts = (k: 'weight' | 'smm' | 'body_fat_pct' | 'ffmi') =>
@@ -46,8 +47,14 @@ export default function Body({ data, run }: PageProps) {
       <form className="card" onSubmit={save}>
         <div className="row between">
           <h2>新增量測</h2>
-          <input type="date" value={form.date} max={today} onChange={(e) => setForm({ ...form, date: e.target.value || today })} />
+          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
         </div>
+        {date !== today && (
+          <div className="row between not-today">
+            <span>⚠ 記錄日期是 {fmtDate(date)}（不是今天）</span>
+            <button type="button" className="ghost small-btn" onClick={() => setDate(today)}>回到今天</button>
+          </div>
+        )}
         <div className="grid3">
           <label>
             體重 kg

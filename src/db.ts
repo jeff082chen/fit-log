@@ -11,6 +11,13 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 type Table = 'workouts' | 'daily_logs' | 'body_metrics'
 
+async function userId(): Promise<string> {
+  const { data } = await supabase.auth.getSession()
+  const id = data.session?.user.id
+  if (!id) throw new Error('登入已過期，請重新登入')
+  return id
+}
+
 function fail(error: { message: string } | null): void {
   if (error) throw new Error(error.message)
 }
@@ -49,7 +56,8 @@ export async function loadSettings(): Promise<Settings> {
   const { data, error } = await supabase.from('settings').select('*').maybeSingle()
   fail(error)
   if (!data) {
-    const { error: e2 } = await supabase.from('settings').insert({})
+    // 第一次登入：建立預設設定（重複執行也不會出錯）
+    const { error: e2 } = await supabase.from('settings').upsert({ user_id: await userId() }, { ignoreDuplicates: true })
     fail(e2)
     return DEFAULT_SETTINGS
   }
@@ -70,6 +78,7 @@ export async function saveSettings(s: Settings): Promise<void> {
   const { unilateral, bodyweight, category_items, ...rest } = s
   // 單邊／自重動作清單存在 exercises 欄位的 _unilateral／_bodyweight 鍵（不需要改資料表結構）
   const { error } = await supabase.from('settings').upsert({
+    user_id: await userId(),
     ...rest,
     exercises: { ...rest.exercises, _unilateral: unilateral, _bodyweight: bodyweight, _category_items: category_items },
     updated_at: new Date().toISOString(),
@@ -103,7 +112,10 @@ export async function renameInRecords(kind: 'exercise' | 'item', from: string, t
   fail(error)
 }
 
-export async function deleteAll(table: Table): Promise<void> {
-  const { error } = await supabase.from(table).delete().gte('id', 0)
-  fail(error)
+/** 依 id 刪除（分批） */
+export async function deleteIds(table: Table, ids: number[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error } = await supabase.from(table).delete().in('id', ids.slice(i, i + 200))
+    fail(error)
+  }
 }

@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import type { PageProps } from '../App'
 import { deleteRow, insertRows } from '../db'
-import { assignCycles, cycleInfo, daysBetween, fmtDate, todayStr } from '../logic'
+import { useRecordDate } from '../hooks'
+import { assignCycles, cycleInfo, daysBetween, fmtDate } from '../logic'
 import { RESET } from '../types'
 
 export default function Dashboard({ data, run }: PageProps) {
-  const today = todayStr()
-  const [date, setDate] = useState(today)
+  const [date, setDate, today] = useRecordDate()
   const targets = data.settings.cycle_targets
   const rows = useMemo(() => assignCycles(data.logs, targets), [data.logs, targets])
   const cur = rows.length ? rows[rows.length - 1].cycle : 1
@@ -54,9 +54,16 @@ export default function Dashboard({ data, run }: PageProps) {
       <section className="card">
         <div className="row between">
           <h2>記一筆</h2>
-          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value || today)} />
+          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
         </div>
-        <p className="muted small">點項目就會記到 {date === today ? '今天' : fmtDate(date)}</p>
+        {date === today ? (
+          <p className="muted small">點項目就會記到今天</p>
+        ) : (
+          <div className="row between not-today">
+            <span>⚠ 點項目會記到 {fmtDate(date)}（不是今天）</span>
+            <button className="ghost small-btn" onClick={() => setDate(today)}>回到今天</button>
+          </div>
+        )}
         <div className="items">
           {info.items.map((i) => {
             const st = i.done >= i.target ? 'done' : i.done === 0 ? 'none' : 'part'

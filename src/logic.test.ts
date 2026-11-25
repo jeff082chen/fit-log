@@ -166,3 +166,20 @@ describe('改名', () => {
     expect([validateName(''), validateName(RESET), validateName('_x'), validateName('ok')].map(Boolean)).toEqual([true, true, true, false])
   })
 })
+
+describe('表單 kg 推算', () => {
+  it('改了上面的組，下面留空的組跟著改；都沒改用上次的值', async () => {
+    const { cascadeKg } = await import('./logic')
+    expect(cascadeKg([null, null, null], [20, 22, 24])).toEqual([20, 22, 24])
+    expect(cascadeKg([22, null, null], [20, 20, 20])).toEqual([22, 22, 22])
+    expect(cascadeKg([null, 25, null], [20, 22, 24])).toEqual([20, 25, 25])
+    expect(cascadeKg([null, null, null, null], [20, 20])).toEqual([20, 20, 20, 20])
+    expect(cascadeKg([null, null], [null, null])).toEqual([null, null])
+  })
+  it('沒有目標時不會自動換輪', () => {
+    const logs = [{ id: 1, date: '2026-11-01', item: '腿', note: null }, { id: 2, date: '2026-11-02', item: '腿', note: null }]
+    expect(assignCycles(logs, []).map((r) => r.cycle)).toEqual([1, 1])
+    expect(assignCycles(logs, [{ item: '腿', target: 0 }]).map((r) => r.cycle)).toEqual([1, 1])
+    expect(cycleInfo(assignCycles(logs, []), [], 1, '2026-11-02', true).complete).toBe(false)
+  })
+})

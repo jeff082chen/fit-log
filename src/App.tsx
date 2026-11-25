@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { loadAll, supabase } from './db'
 import { DEFAULT_SETTINGS, type BodyMetric, type DailyLog, type Settings, type Workout } from './types'
@@ -44,9 +44,12 @@ export default function App() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>()
+  const busy = useRef(false)
   const show = useCallback((msg: string, err = false) => {
     setToast({ msg, err })
-    setTimeout(() => setToast(null), err ? 5000 : 2000)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), err ? 5000 : 2000)
   }, [])
 
   const reload = useCallback(async () => {
@@ -65,14 +68,20 @@ export default function App() {
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, okMsg?: string) => {
+      // 上一個動作還在處理時忽略（避免連點造成重複紀錄）
+      if (busy.current) return false
+      busy.current = true
       try {
         await fn()
         await reload()
         if (okMsg) show(okMsg)
         return true
       } catch (e) {
+        await reload() // 部分成功時也要讓畫面和雲端一致
         show(`失敗：${(e as Error).message}`, true)
         return false
+      } finally {
+        busy.current = false
       }
     },
     [reload, show],

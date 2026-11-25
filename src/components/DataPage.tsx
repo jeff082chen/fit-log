@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { PageProps } from '../App'
-import { deleteAll, insertRows, renameInRecords, saveSettings, supabase } from '../db'
+import { deleteIds, insertRows, renameInRecords, saveSettings, supabase } from '../db'
 import { renameExerciseInSettings, renameItemInSettings, validateName } from '../logic'
 import type { ImportResult } from '../io'
 
@@ -42,6 +42,8 @@ function ExportCard({ data }: Pick<PageProps, 'data'>) {
             setBusy(true)
             try {
               ;(await io()).exportXlsx(data)
+            } catch (e) {
+              alert(`匯出失敗：${(e as Error).message}`)
             } finally {
               setBusy(false)
             }
@@ -49,7 +51,17 @@ function ExportCard({ data }: Pick<PageProps, 'data'>) {
         >
           匯出 Excel
         </button>
-        <button className="ghost grow" disabled={!n} onClick={async () => (await io()).exportJson(data)}>
+        <button
+          className="ghost grow"
+          disabled={!n}
+          onClick={async () => {
+            try {
+              ;(await io()).exportJson(data)
+            } catch (e) {
+              alert(`匯出失敗：${(e as Error).message}`)
+            }
+          }}
+        >
           JSON 備份
         </button>
       </div>
@@ -63,6 +75,7 @@ function ImportCard({ data, run }: Pick<PageProps, 'data' | 'run'>) {
   const [replace, setReplace] = useState(false)
   const [withSettings, setWithSettings] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [inputKey, setInputKey] = useState(0)
 
   const onFile = async (f: File | undefined) => {
     setRes(null)
@@ -80,19 +93,24 @@ function ImportCard({ data, run }: Pick<PageProps, 'data' | 'run'>) {
   const doImport = async () => {
     if (!res) return
     const d = res.data
-    if (replace && !confirm('會先刪除雲端上所有訓練、每日紀錄和身體組成資料，再匯入檔案內容。確定嗎？')) return
+    if (replace && !confirm('雲端上現有的訓練、每日紀錄和身體組成資料會被檔案內容取代。確定嗎？')) return
+    // 取代模式：先新增檔案內容，全部成功後才刪除舊資料（中途失敗不會遺失資料）
+    const old = { w: data.workouts.map((x) => x.id), l: data.logs.map((x) => x.id), b: data.body.map((x) => x.id) }
     const ok = await run(async () => {
-      if (replace) {
-        await deleteAll('workouts')
-        await deleteAll('daily_logs')
-        await deleteAll('body_metrics')
-      }
-      if (withSettings && res.settingsFound) await saveSettings(d.settings)
       await insertRows('workouts', d.workouts)
       await insertRows('daily_logs', d.daily_logs)
       await insertRows('body_metrics', d.body_metrics)
+      if (replace) {
+        await deleteIds('workouts', old.w)
+        await deleteIds('daily_logs', old.l)
+        await deleteIds('body_metrics', old.b)
+      }
+      if (withSettings && res.settingsFound) await saveSettings({ ...data.settings, ...res.settingsPatch })
     }, '匯入完成')
-    if (ok) setRes(null)
+    if (ok) {
+      setRes(null)
+      setInputKey((k) => k + 1)
+    }
   }
 
   const dup = res && !replace ? countDup(res, data) : 0
@@ -101,7 +119,7 @@ function ImportCard({ data, run }: Pick<PageProps, 'data' | 'run'>) {
     <section className="card">
       <h2>匯入</h2>
       <p className="muted small">支援這個網頁匯出的 Excel／JSON，以及原本的「重訓紀錄表.xlsx」。</p>
-      <input type="file" accept=".xlsx,.json" onChange={(e) => onFile(e.target.files?.[0])} />
+      <input key={inputKey} type="file" accept=".xlsx,.json" onChange={(e) => onFile(e.target.files?.[0])} />
       {err && <p className="error">{err}</p>}
       {res && (
         <div className="import-preview">
@@ -148,6 +166,8 @@ function SettingsCard({ settings, data, run }: { settings: Settings; data: PageP
   const dirty = JSON.stringify(s) !== JSON.stringify(settings)
 
   const save = () => {
+    if (!(s.height_cm >= 100 && s.height_cm <= 250)) return alert('身高請填 100～250 cm')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.birth_date)) return alert('請填出生日期')
     const all = new Set(Object.values(s.exercises).flat())
     run(
       () =>

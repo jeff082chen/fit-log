@@ -142,6 +142,8 @@ export interface ImportResult {
   data: Dataset
   skippedRef: number
   settingsFound: boolean
+  /** 檔案裡有的設定（匯入時只覆蓋這些欄位，其他保留目前設定） */
+  settingsPatch: Partial<Settings>
 }
 
 export function parseXlsx(buf: ArrayBuffer): ImportResult {
@@ -149,6 +151,7 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
   const out: Dataset = { settings: structuredClone(DEFAULT_SETTINGS), workouts: [], daily_logs: [], body_metrics: [] }
   let skippedRef = 0
   let settingsFound = false
+  const patch: Partial<Settings> = {}
 
   for (const cat of CATEGORIES) {
     const t = table(wb.Sheets[cat], ['日期', '動作'])
@@ -214,17 +217,19 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
       if (k === '自重動作' && str(val)) bwl.push(str(val)!)
       if (k === '類別對應' && name && str(val) && (CATEGORIES as readonly string[]).includes(name)) out.settings.category_items[name as Category] = str(val)!
     }
-    if (uni.length) out.settings.unilateral = uni
+    out.settings.unilateral = uni
     out.settings.bodyweight = bwl
     if (targets.length) out.settings.cycle_targets = targets
-    for (const c of CATEGORIES) if (ex[c]?.length) out.settings.exercises[c] = ex[c]
+    for (const c of CATEGORIES) out.settings.exercises[c] = ex[c] ?? []
+    // 網頁匯出的設定頁是完整設定
+    Object.assign(patch, out.settings)
   } else {
     const guide = wb.Sheets['使用說明']
     if (guide) {
       const h = num(guide['C5']?.v)
       const b = parseDate(guide['C6']?.v)
-      if (h) { out.settings.height_cm = h; settingsFound = true }
-      if (b) out.settings.birth_date = b
+      if (h) { patch.height_cm = h; settingsFound = true }
+      if (b) patch.birth_date = b
     }
     const board = wb.Sheets['Cycle看板']
     if (board) {
@@ -233,38 +238,50 @@ export function parseXlsx(buf: ArrayBuffer): ImportResult {
         const item = str(board[`B${r}`]?.v)
         if (item) targets.push({ item, target: num(board[`C${r}`]?.v) ?? 0 })
       }
-      if (targets.length) out.settings.cycle_targets = targets
+      if (targets.length) { patch.cycle_targets = targets; settingsFound = true }
     }
     const list = wb.Sheets['動作清單']
     if (list) {
+      const exercises = { ...DEFAULT_SETTINGS.exercises }
+      let found = false
       CATEGORIES.forEach((c, i) => {
         const colL = String.fromCharCode(65 + i)
         if (str(list[`${colL}1`]?.v) !== c) return
         const names: string[] = []
         for (let r = 2; r <= 13; r++) { const v = str(list[`${colL}${r}`]?.v); if (v) names.push(v) }
-        if (names.length) out.settings.exercises[c] = names
+        if (names.length) { exercises[c] = names; found = true }
       })
+      if (found) { patch.exercises = exercises; settingsFound = true }
     }
   }
-  return { data: out, skippedRef, settingsFound }
+  return { data: out, skippedRef, settingsFound, settingsPatch: patch }
 }
 
 export function parseJson(text: string): ImportResult {
   const j = JSON.parse(text)
   if (j.format !== 'fit-log') throw new Error('不是 fit-log 匯出的 JSON 檔')
+  const settings: Settings = {
+    ...DEFAULT_SETTINGS,
+    ...j.settings,
+    unilateral: j.settings?.unilateral ?? DEFAULT_SETTINGS.unilateral,
+    bodyweight: j.settings?.bodyweight ?? DEFAULT_SETTINGS.bodyweight,
+    category_items: { ...DEFAULT_SETTINGS.category_items, ...(j.settings?.category_items ?? {}) },
+  }
+  type R = Record<string, unknown>
+  // 只取需要的欄位（不帶 id／user_id，避免和資料庫衝突）
+  const workouts = ((j.workouts ?? []) as R[]).map((w) => ({
+    date: String(w.date), category: w.category as Category, exercise: String(w.exercise),
+    side: (SIDES as readonly string[]).includes(String(w.side)) ? (w.side as Side) : '雙',
+    body_weight: num(w.body_weight), sets: Array.isArray(w.sets) ? (w.sets as SetEntry[]) : [], note: str(w.note),
+  }))
+  const daily_logs = ((j.daily_logs ?? []) as R[]).map((l) => ({ date: String(l.date), item: String(l.item), note: str(l.note) }))
+  const body_metrics = ((j.body_metrics ?? []) as R[]).map((b) => ({
+    date: String(b.date), weight: num(b.weight), body_fat_pct: num(b.body_fat_pct), smm: num(b.smm),
+  }))
   return {
-    data: {
-      settings: {
-        ...DEFAULT_SETTINGS, ...j.settings,
-        unilateral: j.settings?.unilateral ?? DEFAULT_SETTINGS.unilateral,
-        bodyweight: j.settings?.bodyweight ?? DEFAULT_SETTINGS.bodyweight,
-        category_items: { ...DEFAULT_SETTINGS.category_items, ...(j.settings?.category_items ?? {}) },
-      },
-      workouts: j.workouts ?? [],
-      daily_logs: j.daily_logs ?? [],
-      body_metrics: j.body_metrics ?? [],
-    },
+    data: { settings, workouts, daily_logs, body_metrics },
     skippedRef: 0,
     settingsFound: !!j.settings,
+    settingsPatch: j.settings ? settings : {},
   }
 }
