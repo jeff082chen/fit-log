@@ -16,7 +16,7 @@ const AI_GUIDE: [string, string][] = [
   ['通用', '各資料頁第 1 列是標題、第 2 列是表頭、資料從第 3 列開始（pandas：header=1）。用欄位名稱辨識欄位。表頭標「(計算)」的欄位是匯出時算好的值。'],
   ['訓練頁', '腿／推／拉／引體／核心。一列＝某天一個動作；單邊動作（清單在「設定」頁）左右各一列。欄位：日期、動作、側別（雙／左／右）、體重(kg)、組N kg、組N 次數、備註。'],
   ['kg 留空', '有次數但 kg 空白＝沿用前一組重量；第一組也空白＝自重（0）。沒填次數＝沒做。'],
-  ['重量記法', '啞鈴記單手重量；名稱含「槓鈴」記總重量（含槓）；高腳杯深蹲、仰臥拉舉記單顆重量。'],
+  ['重量記法', 'kg 一律是實際使用的總重量：兩顆啞鈴＝兩顆加總，一顆啞鈴＝那一顆，槓鈴＝含槓總重。單邊動作記該側使用的總重量。因此不同動作的訓練量（kg×次數）可以直接加總比較。'],
   ['自重動作', '引體類別的所有動作，以及「設定」頁列為「自重動作」的動作：kg 負數＝輔助公斤數（-20＝輔助 20 kg），0＝自重，正數＝加重。有效負重＝體重＋kg；體重(kg) 欄空白時，用當天或之前最近一次身體組成的體重（更早則用最早一筆）。'],
   ['核心', '每組做到力竭，看次數；俄羅斯轉體記左右合計次數。'],
   ['計算欄', '估算1RM＝max(有效重量×(1＋次數/30))；進步指標＝估算1RM，自重或核心則用總次數；與上次比＝和同動作、同側別的上一筆相比。'],
@@ -58,7 +58,7 @@ export function exportXlsx(data: { workouts: Workout[]; logs: DailyLog[]; body: 
       row.push(r.note, r.m.setCount, r.m.totalReps, r.m.maxKg, r.m.volume, r.m.e1rm, r.m.indicator, r.delta)
       return row
     })
-    XLSX.utils.book_append_sheet(wb, sheet(`${cat}｜啞鈴記單手、槓鈴記總重；kg 留空＝同上一組`, head, data_), cat)
+    XLSX.utils.book_append_sheet(wb, sheet(`${cat}｜kg 記總重量（兩顆啞鈴請加總）；kg 留空＝同上一組`, head, data_), cat)
   }
   const logs = assignCycles(data.logs, s.cycle_targets)
   XLSX.utils.book_append_sheet(wb, sheet('每日紀錄', ['日期', '項目', '備註', 'Cycle(計算)'],

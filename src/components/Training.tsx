@@ -342,7 +342,7 @@ function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPro
           <thead>
             <tr>
               <th>組</th>
-              <th>{isBW ? (assist ? '輔助 kg' : '加重 kg') : 'kg'}</th>
+              <th>{isBW ? (assist ? '輔助 kg' : '加重 kg') : '總 kg'}</th>
               <th>次數</th>
               <th />
             </tr>
@@ -359,7 +359,7 @@ function BilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPro
           </tbody>
         </table>
         <button className="ghost full" onClick={() => setSets((ss) => [...ss, { kg: '', reps: '', hk: null, hr: null }])}>＋ 加一組</button>
-        <p className="muted small">灰字＝留空時會存的值：次數是上次的次數；kg 是上次的重量，改了某一組的 kg，下面留空的組會跟著改。</p>
+        <p className="muted small">kg 記總重量（兩顆啞鈴請加總）。灰字＝留空時會存的值：次數是上次的次數；kg 是上次的重量，改了某一組的 kg，下面留空的組會跟著改。</p>
         <input placeholder="備註（選填）" value={note} onChange={(e) => setNote(e.target.value)} />
         {daily.node}
         <div className="row gap">
@@ -468,8 +468,8 @@ function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPr
           <thead>
             <tr>
               <th>組</th>
-              <th>{split ? '左 kg' : 'kg'}</th>
-              {split && <th>右 kg</th>}
+              <th>{split ? '左 總kg' : '總 kg'}</th>
+              {split && <th>右 總kg</th>}
               <th>左次數</th>
               <th>右次數</th>
               <th />
@@ -492,7 +492,7 @@ function UnilateralEditor({ data, st, date, rows, bwAt, onClose, run }: EditorPr
           <button className="ghost grow" onClick={() => setSets((ss) => [...ss, { kg: '', kgR: '', l: '', r: '', hkL: null, hkR: null, hrL: null, hrR: null }])}>＋ 加一組</button>
           <button className="ghost" onClick={() => setSplit(!split)}>{split ? '左右同重量' : '左右不同重量'}</button>
         </div>
-        <p className="muted small">灰字＝留空時會存的值（上次的重量和次數；改了某組 kg，下面留空的組會跟著改）。某側這組沒做就填 0。</p>
+        <p className="muted small">kg 記這一側使用的總重量（兩手各拿一顆就兩顆加總）。灰字＝留空時會存的值（上次的重量和次數；改了某組 kg，下面留空的組會跟著改）。某側這組沒做就填 0。</p>
         <input placeholder="備註（選填）" value={note} onChange={(e) => setNote(e.target.value)} />
         {daily.node}
         <div className="row gap">
