@@ -552,6 +552,9 @@ function HistoryBlock({ hist, unilateral, bwAt, bwList, isBW }: {
               )}
             </tbody>
           </table>
+          {recs.some((r) => r && [r.heaviest, r.mostReps, r.maxVolume].some((b) => b?.e1rm != null)) && (
+            <p className="muted small">1RM ≈ 用該組的重量和次數估算（Epley：重量 ×（1＋次數÷30）），自重動作含體重。</p>
+          )}
         </>
       )}
       {series.some((s) => s.points.length > 1) && (
@@ -589,6 +592,7 @@ function RecCell({ r, isBW, volume }: { r: BestSet; isBW: boolean; volume: boole
         {kg} × {r.reps}
         {volume && <span className="muted">（{Math.round(r.volume)}）</span>}
       </div>
+      {r.e1rm !== null && <div className="rec-1rm">1RM ≈ {r.e1rm}</div>}
       <div className="muted">{fmtDate(r.date).slice(2)}</div>
     </div>
   )

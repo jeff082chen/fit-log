@@ -183,3 +183,15 @@ describe('表單 kg 推算', () => {
     expect(cycleInfo(assignCycles(logs, []), [], 1, '2026-11-02', true).complete).toBe(false)
   })
 })
+
+describe('個人紀錄的估算 1RM', () => {
+  it('每一組換算 1RM；引體含體重；核心與無負重不顯示', () => {
+    const r = bestSets([W(1, '2026-11-20', '高腳杯深蹲', '雙', [{ kg: 20, reps: 12 }, { kg: 24, reps: 6 }])], null)!
+    expect(r.heaviest.e1rm).toBe(28.8) // 24 × (1 + 6/30)
+    expect(r.mostReps.e1rm).toBe(28) // 20 × (1 + 12/30)
+    const p = bestSets([W(1, 'a', '輔助反握引體', '雙', [{ kg: -18, reps: 5 }], '引體')], 66.6)!
+    expect(p.heaviest.e1rm).toBe(56.7)
+    expect(bestSets([W(1, 'a', '捲腹', '雙', [{ kg: null, reps: 25 }], '核心')], null)!.mostReps.e1rm).toBeNull()
+    expect(bestSets([W(1, 'a', '伏地挺身', '雙', [{ kg: null, reps: 15 }], '推')], null)!.mostReps.e1rm).toBeNull()
+  })
+})

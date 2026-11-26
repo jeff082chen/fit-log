@@ -237,8 +237,9 @@ export interface BestSet {
   side: Workout['side']
   kg: number
   reps: number
-  load: number // 引體＝體重＋kg，其他＝kg
+  load: number // 自重動作＝體重＋kg，其他＝kg
   volume: number // load × reps
+  e1rm: number | null // 這一組換算的估算 1RM（Epley）；核心或沒有負重時為 null
 }
 
 /** 歷史中重量最重、次數最多、容量（重量×次數）最大的一組 */
@@ -252,7 +253,8 @@ export function bestSets(
     const bw = isBodyweight(r.category, r.exercise, bwExercises) ? r.body_weight ?? resolveBW(bwSource, r.date) ?? 0 : 0
     for (const s of effectiveSets(r.sets)) {
       const load = s.kg + bw
-      all.push({ date: r.date, side: r.side, kg: s.kg, reps: s.reps, load, volume: load * s.reps })
+      const e1rm = r.category !== '核心' && load > 0 ? round1(load * (1 + s.reps / 30)) : null
+      all.push({ date: r.date, side: r.side, kg: s.kg, reps: s.reps, load, volume: load * s.reps, e1rm })
     }
   }
   if (!all.length) return null
